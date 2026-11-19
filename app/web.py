@@ -61,6 +61,23 @@ templates.env.globals.update(
 templates.env.filters["nl2p"] = nl2p
 
 
+def _reservation_helpers() -> None:
+    from app.services import reservations
+    from app.services.accounts import may_set_unit
+
+    templates.env.globals.update(
+        fmt_when=reservations.fmt_when,
+        fmt_time=reservations.fmt_time,
+        fmt_minutes=reservations.fmt_minutes,
+        space_name=reservations.space_name,
+        local_time=reservations.local,
+        may_set_unit=may_set_unit,
+    )
+
+
+_reservation_helpers()
+
+
 def render(request: Request, name: str, status_code: int = 200, **ctx) -> HTMLResponse:
     flash = None
     raw = request.cookies.get(FLASH_COOKIE)

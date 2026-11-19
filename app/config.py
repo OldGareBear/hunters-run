@@ -12,6 +12,7 @@ import json
 import os
 from functools import lru_cache
 from typing import Any, Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import Field, model_validator
 from pydantic.fields import FieldInfo
@@ -20,6 +21,8 @@ from pydantic_settings import (
     PydanticBaseSettingsSource,
     SettingsConfigDict,
 )
+
+from app.amenities import DEFAULT_AMENITIES, AmenityGroup, parse_amenities
 
 DEV_SECRET = "dev-insecure-secret-change-me"  # noqa: S105
 
@@ -192,6 +195,12 @@ class Settings(BaseSettings):
     management_notify_emails: str = ""
     board_can_view_tickets: bool = False
 
+    # --- Reservations -------------------------------------------------------
+    # Local time zone for opening hours and calendars (an IANA name).
+    hoa_timezone: str = "America/New_York"
+    # Bookable amenities and their rules; see app/amenities.py for every option.
+    amenities: str = json.dumps(DEFAULT_AMENITIES)
+
     seed_demo_password: str = Field(default="", repr=False)
 
     @property
@@ -204,12 +213,21 @@ class Settings(BaseSettings):
         return _parse_folder_roles(self.dropbox_folder_roles)
 
     @property
+    def amenity_groups(self) -> list[AmenityGroup]:
+        return _amenity_groups(self.amenities)
+
+    @property
     def management_notify_list(self) -> list[str]:
         return [e.strip() for e in self.management_notify_emails.split(",") if e.strip()]
 
     @model_validator(mode="after")
     def _check_production(self) -> Settings:
         _parse_folder_roles(self.dropbox_folder_roles)  # fail fast on a bad mapping
+        _amenity_groups(self.amenities)
+        try:
+            ZoneInfo(self.hoa_timezone)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError(f"HOA_TIMEZONE {self.hoa_timezone!r} isn't a known time zone") from exc
         if self.app_env != "production":
             return self
         problems = []
@@ -260,6 +278,11 @@ def _parse_folder_roles(raw: str) -> list[tuple[str, list[str]]]:
             raise ValueError(f"DROPBOX_FOLDER_ROLES: unknown group(s) {sorted(bad)} for {folder!r}")
         out.append((path, sorted(set(roles))))
     return sorted(out, key=lambda item: item[0].count("/"), reverse=True)
+
+
+@lru_cache(maxsize=8)
+def _amenity_groups(raw: str) -> list[AmenityGroup]:
+    return parse_amenities(raw)
 
 
 @lru_cache

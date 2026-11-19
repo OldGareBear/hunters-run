@@ -1,0 +1,7 @@
+Your booking for the {{ space }} on {{ when }} was cancelled by {{ by }}.
+{% if reason %}
+
+Reason: {{ reason }}
+{% endif %}
+
+Book another time: {{ link }}

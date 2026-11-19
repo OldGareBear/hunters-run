@@ -1,0 +1,8 @@
+{% if approved %}Your booking is confirmed: {{ space }}, {{ when }}.{% else %}Your request for the {{ space }} on {{ when }} was declined.{% endif %}
+{% if note %}
+
+Note from management:
+{{ note }}
+{% endif %}
+
+See it in the portal: {{ link }}

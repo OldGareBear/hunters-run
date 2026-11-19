@@ -45,12 +45,20 @@ class User(Base):
     password_hash: Mapped[str | None] = mapped_column(String(255))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     email_opt_out_announcements: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Home address or unit number. People with the same unit share one household's
+    # booking limits; leave blank and the person counts as their own household.
+    unit: Mapped[str] = mapped_column(String(80), default="", server_default="")
     created_at: Mapped[datetime] = _ts(default=utcnow)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     @property
     def display_name(self) -> str:
         return self.full_name or self.email
+
+    @property
+    def household(self) -> str:
+        unit = " ".join(self.unit.split()).lower()
+        return f"unit:{unit}" if unit else f"user:{self.id}"
 
 
 class Invite(Base):
@@ -59,6 +67,7 @@ class Invite(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     email: Mapped[str] = mapped_column(String(320), index=True)
     role: Mapped[str] = mapped_column(String(32))
+    unit: Mapped[str] = mapped_column(String(80), default="", server_default="")
     token_hash: Mapped[str] = mapped_column(String(64), unique=True)
     invited_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = _ts(default=utcnow)
@@ -315,6 +324,58 @@ class EmailMessage(Base):
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+RESERVATION_ACTIVE = ("pending", "confirmed")
+
+
+class Reservation(Base):
+    """A booking of one amenity space. Times are stored in UTC."""
+
+    __tablename__ = "reservations"
+    __table_args__ = (
+        Index("ix_reservations_space_starts", "space", "starts_at"),
+        Index("ix_reservations_group_household", "amenity_group", "household", "starts_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    amenity_group: Mapped[str] = mapped_column(String(60))
+    space: Mapped[str] = mapped_column(String(60))
+    # "booking" by a household, or "block" (management closing the space).
+    kind: Mapped[str] = mapped_column(String(20), default="booking")
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    household: Mapped[str] = mapped_column(String(100))
+    starts_at: Mapped[datetime] = _ts()
+    ends_at: Mapped[datetime] = _ts()
+    # pending (waiting for approval) | confirmed | declined | cancelled
+    status: Mapped[str] = mapped_column(String(20), default="confirmed", index=True)
+    purpose: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = _ts(default=utcnow)
+    decided_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    decision_note: Mapped[str] = mapped_column(Text, default="")
+    cancelled_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    cancelled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancel_reason: Mapped[str] = mapped_column(Text, default="")
+    # True when the household cancelled inside the late-cancel window, so the booking
+    # still counts toward their daily and weekly limits.
+    counts_after_cancel: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    user: Mapped[User | None] = relationship(foreign_keys=[user_id])
+    decided_by: Mapped[User | None] = relationship(foreign_keys=[decided_by_id])
+    cancelled_by: Mapped[User | None] = relationship(foreign_keys=[cancelled_by_id])
+
+    @property
+    def is_active(self) -> bool:
+        return self.status in RESERVATION_ACTIVE
+
+    @property
+    def start(self) -> datetime:
+        return as_utc(self.starts_at)
+
+    @property
+    def end(self) -> datetime:
+        return as_utc(self.ends_at)
+
+
 class AuditLog(Base):
     __tablename__ = "audit_log"
 
@@ -342,6 +403,8 @@ __all__ = [
     "Invite",
     "LoginAttempt",
     "PasswordReset",
+    "RESERVATION_ACTIVE",
+    "Reservation",
     "TICKET_STATUSES",
     "Ticket",
     "TicketMessage",

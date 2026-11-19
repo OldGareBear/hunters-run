@@ -40,6 +40,7 @@ def invite(
     background: BackgroundTasks,
     email: str = Form(...),
     role: str = Form(...),
+    unit: str = Form(""),
     user: User = Depends(require_perm(Perm.USERS_VIEW)),
     db: Session = Depends(get_db),
 ):
@@ -50,7 +51,7 @@ def invite(
     if role_enum not in roles_user_may_invite(user):
         raise HTTPException(403)
     try:
-        inv = accounts.create_invite(db, email=email, role=role_enum, invited_by=user)
+        inv = accounts.create_invite(db, email=email, role=role_enum, invited_by=user, unit=unit)
     except accounts.AccountError as exc:
         return redirect("/admin/users", str(exc), "error")
     audit(
@@ -133,6 +134,35 @@ def change_role(
     )
     db.commit()
     return redirect("/admin/users", f"{target.display_name} is now {new_role.label}.")
+
+
+@router.post("/users/{user_id}/unit")
+def set_unit(
+    request: Request,
+    user_id: int,
+    unit: str = Form(""),
+    user: User = Depends(require_perm(Perm.USERS_VIEW)),
+    db: Session = Depends(get_db),
+):
+    target = db.get(User, user_id)
+    if target is None:
+        raise HTTPException(404)
+    if not accounts.may_set_unit(user, target):
+        raise HTTPException(403)
+    before = target.unit
+    target.unit = accounts.clean_unit(unit)
+    audit(
+        db,
+        "user.unit_changed",
+        actor=user,
+        target_type="user",
+        target_id=target.id,
+        request=request,
+        before=before,
+        after=target.unit,
+    )
+    db.commit()
+    return redirect("/admin/users", f"Saved the unit for {target.display_name}.")
 
 
 @router.post("/users/{user_id}/active")

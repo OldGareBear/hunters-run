@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Requests and bookings{% endblock %}
+{% block content %}
+<h1>Requests and bookings</h1>
+<section class="card">
+  <h2>Waiting for approval</h2>
+  <table class="table">
+    <thead><tr><th>What</th><th>When</th><th>Who</th><th>Purpose</th></tr></thead>
+    <tbody>{% for r in pending %}
+      <tr><td><a href="/reservations/r/{{ r.id }}">{{ space_name(r) }}</a></td><td>{{ fmt_when(r.start, r.end) }}</td>
+      <td>{{ r.user.display_name if r.user else "Former user" }}{% if r.user and r.user.unit %}<div class="muted small">{{ r.user.unit }}</div>{% endif %}</td><td>{{ r.purpose }}</td></tr>
+    {% else %}<tr><td colspan="4" class="muted">No requests waiting.</td></tr>{% endfor %}</tbody>
+  </table>
+</section>
+<section class="card">
+  <h2>Upcoming</h2>
+  <table class="table">
+    <thead><tr><th>What</th><th>When</th><th>Who</th></tr></thead>
+    <tbody>{% for r in upcoming %}
+      <tr><td><a href="/reservations/r/{{ r.id }}">{{ space_name(r) }}</a></td><td>{{ fmt_when(r.start, r.end) }}</td>
+      <td>{% if r.kind == "block" %}<span class="muted">Closed: {{ r.purpose }}</span>{% else %}{{ r.user.display_name if r.user else "Former user" }}{% if r.user and r.user.unit %} ({{ r.user.unit }}){% endif %}{% endif %}</td></tr>
+    {% else %}<tr><td colspan="3" class="muted">Nothing booked.</td></tr>{% endfor %}</tbody>
+  </table>
+</section>
+{% endblock %}

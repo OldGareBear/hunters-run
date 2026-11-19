@@ -11,7 +11,7 @@ from app.config import get_settings
 from app.db import utcnow
 from app.email.outbox import enqueue
 from app.models import Invite, LoginAttempt, PasswordReset, User, as_utc
-from app.permissions import Role
+from app.permissions import Perm, Role, has_perm
 from app.security.passwords import hash_password, needs_rehash, verify_password
 from app.security.tokens import hash_token, new_token
 
@@ -34,7 +34,20 @@ def get_user_by_email(db: Session, email: str) -> User | None:
 # --- Invites ------------------------------------------------------------------
 
 
-def create_invite(db: Session, *, email: str, role: Role, invited_by: User | None) -> Invite:
+def clean_unit(unit: str) -> str:
+    return " ".join((unit or "").split())[:80]
+
+
+def may_set_unit(actor: User, target: User) -> bool:
+    """Admins can set anyone's unit; board and management can for everyone but admins."""
+    if has_perm(actor, Perm.USERS_MANAGE):
+        return True
+    return has_perm(actor, Perm.USERS_INVITE_HOMEOWNER) and target.role != Role.ADMIN.value
+
+
+def create_invite(
+    db: Session, *, email: str, role: Role, invited_by: User | None, unit: str = ""
+) -> Invite:
     email = normalise_email(email)
     if get_user_by_email(db, email):
         raise AccountError("Someone with that email already has an account.")
@@ -46,6 +59,7 @@ def create_invite(db: Session, *, email: str, role: Role, invited_by: User | Non
     invite = Invite(
         email=email,
         role=role.value,
+        unit=clean_unit(unit),
         token_hash=hash_token(token),
         invited_by_id=invited_by.id if invited_by else None,
         expires_at=utcnow() + timedelta(hours=get_settings().invite_ttl_hours),
@@ -78,6 +92,7 @@ def accept_invite(db: Session, invite: Invite, *, full_name: str, password: str)
         email=invite.email,
         full_name=full_name.strip()[:200],
         role=invite.role,
+        unit=invite.unit,
         password_hash=hash_password(password),
     )
     db.add(user)

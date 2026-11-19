@@ -155,7 +155,11 @@ def cmd_seed(_args) -> None:
         user = accounts.get_user_by_email(db, email)
         if user is None:
             user = User(
-                email=email, full_name=name, role=role.value, password_hash=hash_password(password)
+                email=email,
+                full_name=name,
+                role=role.value,
+                password_hash=hash_password(password),
+                unit={Role.BOARD: "Unit 3", Role.HOMEOWNER: "Unit 7"}.get(role, ""),
             )
             db.add(user)
             db.flush()

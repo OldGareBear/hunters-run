@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}{{ view.name }}{% endblock %}
+{% block main_class %}page wide{% endblock %}
+{% block content %}
+<div class="head-row">
+  <h1>{{ view.name }}</h1>
+  <div class="row small">
+    {% if view.group.spaces|length > 1 %}{% for slug, name in view.group.spaces.items() %}{% if slug != view.space %}<a href="/reservations/{{ slug }}?week={{ view.start }}">{{ name }}</a>{% endif %}{% endfor %}{% endif %}
+    <a href="/reservations">All amenities</a>
+  </div>
+</div>
+<div class="cal-layout">
+<section class="card">
+  <div class="head-row">
+    <div>{% if view.prev %}<a href="/reservations/{{ view.space }}?week={{ view.prev }}">&larr; Previous week</a>{% endif %}</div>
+    <strong>Week of {{ view.start.strftime("%B %-d, %Y") }}</strong>
+    <div>{% if view.next %}<a href="/reservations/{{ view.space }}?week={{ view.next }}">Next week &rarr;</a>{% endif %}</div>
+  </div>
+  <div class="cal-scroll">
+  <table class="cal">
+    <thead><tr><th></th>{% for d in view.days %}<th>{{ d.strftime("%a") }}<div class="muted small">{{ d.strftime("%b %-d") }}</div></th>{% endfor %}</tr></thead>
+    <tbody>{% for row in view.rows %}
+      <tr><th class="muted small">{{ view.times[loop.index0] }}</th>
+      {% for c in row %}<td class="slot {{ c.state }}">{% if c.href %}<a href="{{ c.href }}" title="{{ c.label }}">{{ c.label }}</a>{% else %}{{ c.label }}{% endif %}</td>{% endfor %}</tr>
+    {% endfor %}</tbody>
+  </table>
+  </div>
+  <p class="muted small">Times are local to the HOA ({{ settings().hoa_timezone }}). Pick a free slot to book it.</p>
+</section>
+<aside class="card">
+  <h2>Rules</h2>
+  <ul class="rules">{% for line in rules %}<li>{{ line }}</li>{% endfor %}
+  {% for n in view.group.notes %}<li>{{ n }}</li>{% endfor %}</ul>
+</aside>
+</div>
+{% endblock %}

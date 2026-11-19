@@ -85,3 +85,23 @@ tr.inactive { opacity: .55; }
 .email-preview { border: 1px dashed var(--line); border-radius: 8px; padding: 1rem; }
 code { font-size: .8rem; word-break: break-word; }
 @media (max-width: 760px) { .chat-layout { grid-template-columns: 1fr; } .ask { flex-direction: column; align-items: stretch; } }
+.cal-layout { display: grid; grid-template-columns: 1fr 280px; gap: 1rem; align-items: start; }
+.cal-scroll { overflow-x: auto; }
+.cal { width: 100%; border-collapse: collapse; font-size: .82rem; table-layout: fixed; min-width: 640px; }
+.cal th { font-weight: 600; padding: .3rem; text-align: center; }
+.cal tbody th { text-align: right; white-space: nowrap; width: 5.5rem; }
+.cal td { border: 1px solid var(--line); height: 1.9rem; padding: 0; text-align: center; overflow: hidden;
+  white-space: nowrap; text-overflow: ellipsis; }
+.cal td a { display: block; line-height: 1.9rem; text-decoration: none; padding: 0 .2rem; overflow: hidden; text-overflow: ellipsis; }
+.slot.free a { color: var(--ok); } .slot.free:hover { background: var(--ok-bg); }
+.slot.past, .slot.unavailable { background: var(--pill); }
+.slot.booked { background: var(--err-bg); color: var(--danger); }
+.slot.yours { background: var(--accent); } .slot.yours a { color: var(--accent-ink); }
+.slot.pending { background: var(--user-bubble); }
+.slot.blocked { background: repeating-linear-gradient(45deg, var(--pill), var(--pill) 6px, var(--line) 6px, var(--line) 12px); color: var(--muted); }
+.rules { padding-left: 1.1rem; margin: 0; } .rules li { margin-bottom: .4rem; }
+.status.confirmed { background: var(--ok-bg); color: var(--ok); }
+.status.pending { background: var(--user-bubble); }
+.status.declined, .status.cancelled { background: var(--pill); color: var(--muted); }
+@media (max-width: 900px) { .cal-layout { grid-template-columns: 1fr; } }
+.unit-form input { display: inline-block; width: 7rem; margin: 0 .4rem 0 0; padding: .3rem .45rem; }

@@ -24,7 +24,11 @@ def test_policy_matrix():
     assert Perm.BLASTS_SEND in POLICY[Role.BOARD]
     assert Perm.BLASTS_SEND not in POLICY[Role.MANAGEMENT]
     assert Perm.TICKETS_HANDLE in POLICY[Role.MANAGEMENT]
-    assert POLICY[Role.HOMEOWNER] == frozenset({Perm.CHAT, Perm.TICKETS_CREATE})
+    assert POLICY[Role.HOMEOWNER] == frozenset(
+        {Perm.CHAT, Perm.TICKETS_CREATE, Perm.RESERVATIONS_BOOK}
+    )
+    assert Perm.RESERVATIONS_MANAGE in POLICY[Role.MANAGEMENT]
+    assert Perm.RESERVATIONS_MANAGE not in POLICY[Role.BOARD]
 
 
 def test_local_storage_round_trip_and_tamper(tmp_path):

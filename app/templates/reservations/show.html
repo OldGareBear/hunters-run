@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}{{ space_name(r) }}{% endblock %}
+{% block content %}
+<section class="card">
+  <p class="muted small">{{ "Closure" if r.kind == "block" else "Booking" }} #{{ r.id }}</p>
+  <h1>{{ space_name(r) }}</h1>
+  <dl class="facts">
+    <dt>When</dt><dd>{{ fmt_when(r.start, r.end) }}</dd>
+    <dt>Status</dt><dd><span class="status {{ r.status }}">{{ {"pending": "Waiting for approval", "confirmed": "Confirmed", "declined": "Declined", "cancelled": "Cancelled"}[r.status] }}</span></dd>
+    {% if r.kind == "booking" %}<dt>Booked by</dt><dd>{{ r.user.display_name if r.user else "Former user" }}{% if r.user and r.user.unit %} ({{ r.user.unit }}){% endif %}</dd>{% endif %}
+    {% if r.purpose %}<dt>{{ "Reason" if r.kind == "block" else "Purpose" }}</dt><dd>{{ r.purpose }}</dd>{% endif %}
+    {% if r.decision_note %}<dt>Note from management</dt><dd>{{ r.decision_note }}</dd>{% endif %}
+    {% if r.status == "cancelled" %}<dt>Cancelled</dt><dd>{{ local_time(r.cancelled_at).strftime("%b %-d, %-I:%M %p") }}{% if r.cancelled_by %} by {{ r.cancelled_by.display_name }}{% endif %}{% if r.cancel_reason %}: {{ r.cancel_reason }}{% endif %}{% if r.counts_after_cancel %} · still counts toward the household's limits{% endif %}</dd>{% endif %}
+  </dl>
+</section>
+{% if manager and r.status == "pending" %}
+<section class="card">
+  <h2>Decide this request</h2>
+  <form method="post" action="/reservations/r/{{ r.id }}/decide">
+    {{ csrf_input(request) }}
+    <label>Note to the homeowner <span class="muted small">(optional, included in the email: fees, deposit, rules)</span>
+      <textarea name="note" rows="3" maxlength="2000"></textarea></label>
+    <button class="primary" name="decision" value="approve">Approve</button>
+    <button class="danger" name="decision" value="decline">Decline</button>
+  </form>
+</section>
+{% endif %}
+{% if can_cancel %}
+<section class="card">
+  <form method="post" action="/reservations/r/{{ r.id }}/cancel" data-confirm="Cancel this {{ 'closure' if r.kind == 'block' else 'booking' }}?">
+    {{ csrf_input(request) }}
+    {% if manager and r.kind == "booking" and r.household != user.household %}
+    <label>Reason <span class="muted small">(emailed to the household)</span><input type="text" name="reason" maxlength="500"></label>
+    {% endif %}
+    <button class="danger">{{ "Reopen" if r.kind == "block" else "Cancel booking" }}</button>
+  </form>
+</section>
+{% endif %}
+<p><a href="/reservations/{{ r.space }}?week={{ local_time(r.start).date() }}">Back to the calendar</a></p>
+{% endblock %}

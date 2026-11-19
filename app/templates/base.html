@@ -14,6 +14,7 @@
   <nav>
     {% if has_perm(user, Perm.CHAT) %}<a href="/chat">Ask</a>{% endif %}
     <a href="/documents">Documents</a>
+    {% if has_perm(user, Perm.RESERVATIONS_BOOK) or has_perm(user, Perm.RESERVATIONS_MANAGE) %}<a href="/reservations">Book</a>{% endif %}
     <a href="/tickets">{% if has_perm(user, Perm.TICKETS_HANDLE) %}Tickets{% else %}My requests{% endif %}</a>
     {% if has_perm(user, Perm.BLASTS_SEND) %}<a href="/blasts">Announcements</a>{% endif %}
     {% if has_perm(user, Perm.USERS_VIEW) %}<a href="/admin/users">People</a>{% endif %}

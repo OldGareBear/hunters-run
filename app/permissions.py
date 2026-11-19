@@ -55,6 +55,9 @@ class Perm(StrEnum):
     TICKETS_CREATE = "tickets.create"
     TICKETS_HANDLE = "tickets.handle"
     AUDIT_VIEW = "audit.view"
+    RESERVATIONS_BOOK = "reservations.book"
+    # Approve and decline requests, cancel anyone's booking, block time, see who booked.
+    RESERVATIONS_MANAGE = "reservations.manage"
 
 
 POLICY: dict[Role, frozenset[Perm]] = {
@@ -69,6 +72,7 @@ POLICY: dict[Role, frozenset[Perm]] = {
             Perm.BLASTS_SEND,
             Perm.AUDIT_VIEW,
             Perm.TICKETS_CREATE,  # board members are homeowners too
+            Perm.RESERVATIONS_BOOK,
         }
     ),
     Role.MANAGEMENT: frozenset(
@@ -79,9 +83,10 @@ POLICY: dict[Role, frozenset[Perm]] = {
             Perm.USERS_VIEW,
             Perm.USERS_INVITE_HOMEOWNER,
             Perm.TICKETS_HANDLE,
+            Perm.RESERVATIONS_MANAGE,
         }
     ),
-    Role.HOMEOWNER: frozenset({Perm.CHAT, Perm.TICKETS_CREATE}),
+    Role.HOMEOWNER: frozenset({Perm.CHAT, Perm.TICKETS_CREATE, Perm.RESERVATIONS_BOOK}),
 }
 
 
