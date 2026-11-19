@@ -113,15 +113,34 @@ class Settings(BaseSettings):
     min_password_length: int = 12
 
     # --- Storage -----------------------------------------------------------
-    storage_backend: Literal["local", "dropbox", "s3"] = "local"
-    # Master key for encrypting files before they are stored (local and Dropbox).
-    # 32 bytes, urlsafe base64. Generate: python -m app.cli generate-key
-    storage_encryption_key: str = _secret()
-    local_storage_dir: str = "./var/documents"
+    # Where documents come from:
+    #   dropbox: the board keeps them in a Dropbox folder; the portal reads and indexes
+    #            them, and the subfolder a file is in decides who can see it.
+    #   upload:  people upload through the portal; files go to STORAGE_BACKEND.
+    document_source: Literal["upload", "dropbox"] = "upload"
     dropbox_app_key: str = ""
     dropbox_app_secret: str = _secret()
     dropbox_refresh_token: str = _secret()
-    dropbox_root: str = "/documents"  # inside the app's folder in Dropbox
+    dropbox_root: str = "/HOA Portal"
+    # Subfolder (relative to DROPBOX_ROOT) -> groups who can see files in it. A file
+    # takes the deepest matching folder; files outside every listed folder are ignored.
+    dropbox_folder_roles: str = json.dumps(
+        {
+            "Everyone": ["board", "management", "homeowner"],
+            "Board and Management": ["board", "management"],
+            "Board": ["board"],
+            "Management": ["management"],
+        }
+    )
+    dropbox_sync_minutes: int = 10
+    dropbox_max_file_mb: int = 50
+
+    # Storage for portal uploads (DOCUMENT_SOURCE=upload).
+    storage_backend: Literal["local", "s3"] = "local"
+    # Master key for encrypting uploaded files on disk. 32 bytes, urlsafe base64.
+    # Generate: python -m app.cli generate-key
+    storage_encryption_key: str = _secret()
+    local_storage_dir: str = "./var/documents"
     s3_bucket: str = ""
     s3_region: str = "us-east-1"
     s3_prefix: str = "documents/"
@@ -180,30 +199,37 @@ class Settings(BaseSettings):
         return self.app_env == "production"
 
     @property
+    def dropbox_folder_map(self) -> list[tuple[str, list[str]]]:
+        """(lower-cased folder path, roles), deepest folders first."""
+        return _parse_folder_roles(self.dropbox_folder_roles)
+
+    @property
     def management_notify_list(self) -> list[str]:
         return [e.strip() for e in self.management_notify_emails.split(",") if e.strip()]
 
     @model_validator(mode="after")
     def _check_production(self) -> Settings:
+        _parse_folder_roles(self.dropbox_folder_roles)  # fail fast on a bad mapping
         if self.app_env != "production":
             return self
         problems = []
+        uploads = self.document_source == "upload"
         if self.secret_key == DEV_SECRET or len(self.secret_key) < 32:
             problems.append("SECRET_KEY must be set to a random value of 32+ characters")
         if not self.session_cookie_secure:
             problems.append("SESSION_COOKIE_SECURE must be true")
         if self.database_url.startswith("sqlite"):
             problems.append("DATABASE_URL must point at Postgres")
-        if self.storage_backend == "s3" and not (self.s3_bucket and self.s3_kms_key_id):
+        if uploads and self.storage_backend == "s3" and not (self.s3_bucket and self.s3_kms_key_id):
             problems.append("S3_BUCKET and S3_KMS_KEY_ID are required for the s3 backend")
-        if self.storage_backend in ("local", "dropbox") and not self.storage_encryption_key:
-            problems.append("STORAGE_ENCRYPTION_KEY is required for the local and dropbox backends")
-        if self.storage_backend == "dropbox" and not (
+        if uploads and self.storage_backend == "local" and not self.storage_encryption_key:
+            problems.append("STORAGE_ENCRYPTION_KEY is required for the local storage backend")
+        if self.document_source == "dropbox" and not (
             self.dropbox_app_key and self.dropbox_app_secret and self.dropbox_refresh_token
         ):
             problems.append(
                 "DROPBOX_APP_KEY, DROPBOX_APP_SECRET and DROPBOX_REFRESH_TOKEN are required "
-                "for the dropbox backend"
+                "when DOCUMENT_SOURCE=dropbox"
             )
         if self.llm_provider == "anthropic" and not self.anthropic_api_key:
             problems.append("ANTHROPIC_API_KEY is required when LLM_PROVIDER=anthropic")
@@ -214,6 +240,26 @@ class Settings(BaseSettings):
         if problems:
             raise ValueError("Unsafe production configuration: " + "; ".join(problems))
         return self
+
+
+def _parse_folder_roles(raw: str) -> list[tuple[str, list[str]]]:
+    shareable = {"board", "management", "homeowner"}
+    try:
+        data = json.loads(raw)
+    except ValueError as exc:
+        raise ValueError("DROPBOX_FOLDER_ROLES must be a JSON object") from exc
+    if not isinstance(data, dict) or not data:
+        raise ValueError("DROPBOX_FOLDER_ROLES must be a non-empty JSON object")
+    out = []
+    for folder, roles in data.items():
+        path = "/".join(p for p in str(folder).strip().lower().split("/") if p)
+        if not path or not isinstance(roles, list) or not roles:
+            raise ValueError(f"DROPBOX_FOLDER_ROLES: bad entry for {folder!r}")
+        bad = set(roles) - shareable
+        if bad:
+            raise ValueError(f"DROPBOX_FOLDER_ROLES: unknown group(s) {sorted(bad)} for {folder!r}")
+        out.append((path, sorted(set(roles))))
+    return sorted(out, key=lambda item: item[0].count("/"), reverse=True)
 
 
 @lru_cache

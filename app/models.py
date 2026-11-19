@@ -133,6 +133,11 @@ class Document(Base):
     created_at: Mapped[datetime] = _ts(default=utcnow)
     updated_at: Mapped[datetime] = _ts(default=utcnow, onupdate=utcnow)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # "upload" (stored by the portal) or "dropbox" (read from the board's folder).
+    source: Mapped[str] = mapped_column(String(20), default="upload", server_default="upload")
+    source_id: Mapped[str | None] = mapped_column(String(200), unique=True)  # Dropbox file id
+    source_path: Mapped[str] = mapped_column(String(1000), default="", server_default="")
+    source_rev: Mapped[str] = mapped_column(String(100), default="", server_default="")
 
     uploaded_by: Mapped[User | None] = relationship()
     access: Mapped[list[DocumentAccess]] = relationship(
@@ -145,6 +150,19 @@ class Document(Base):
     @property
     def role_names(self) -> list[str]:
         return sorted(a.role for a in self.access)
+
+
+class SyncState(Base):
+    """One row per external document source; doubles as a lock between workers."""
+
+    __tablename__ = "sync_state"
+
+    source: Mapped[str] = mapped_column(String(20), primary_key=True)
+    locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_summary: Mapped[dict] = mapped_column(JSON, default=dict)
+    last_error: Mapped[str] = mapped_column(Text, default="")
 
 
 class DocumentAccess(Base):

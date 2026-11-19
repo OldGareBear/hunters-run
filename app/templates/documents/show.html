@@ -12,11 +12,16 @@
     <dt>Added</dt><dd>{{ doc.created_at.strftime("%b %-d, %Y") }}{% if doc.uploaded_by %} by {{ doc.uploaded_by.display_name }}{% endif %}</dd>
     <dt>Assistant</dt><dd>{% if doc.status == "ready" %}Indexed{% elif doc.status == "failed" %}<span class="bad">Not indexed: {{ doc.error }}</span>{% else %}Processing{% endif %}</dd>
     <dt>Visible to</dt><dd>{% for r in doc.role_names %}<span class="pill">{{ role_label(r) }}</span> {% endfor %}</dd>
+    {% if doc.source == "dropbox" and can_manage %}<dt>In Dropbox</dt><dd>{{ doc.source_path }}</dd>{% endif %}
   </dl>
 </section>
 {% if can_manage %}
 <section class="card">
   <h2>Manage</h2>
+  {% if doc.source == "dropbox" %}
+  <p>This document is managed in Dropbox. To change who can see it, move it to another folder there; to remove it, delete it there.</p>
+  <form method="post" action="/documents/{{ doc.id }}/reindex" class="inline">{{ csrf_input(request) }}<button>Re-index</button></form>
+  {% else %}
   <form method="post" action="/documents/{{ doc.id }}/visibility">
     {{ csrf_input(request) }}
     {% set selected = doc.role_names %}
@@ -27,6 +32,7 @@
     <form method="post" action="/documents/{{ doc.id }}/reindex" class="inline">{{ csrf_input(request) }}<button>Re-index</button></form>
     <form method="post" action="/documents/{{ doc.id }}/delete" class="inline" data-confirm="Delete this document for everyone? This can't be undone.">{{ csrf_input(request) }}<button class="danger">Delete</button></form>
   </div>
+  {% endif %}
 </section>
 {% endif %}
 {% endblock %}

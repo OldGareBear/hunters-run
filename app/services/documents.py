@@ -79,11 +79,20 @@ def create_document(
     return doc
 
 
+def read_bytes(doc: Document) -> bytes:
+    """The document's file: from Dropbox for synced documents, else from storage."""
+    if doc.source == "dropbox":
+        from app.dropbox import get_dropbox
+
+        return get_dropbox().download(doc.source_id)
+    return get_storage().get(doc.storage_key)
+
+
 def index_document(db: Session, doc: Document, data: bytes | None = None) -> None:
     """(Re)build the chunks and embeddings for a document."""
     s = get_settings()
     if data is None:
-        data = get_storage().get(doc.storage_key)
+        data = read_bytes(doc)
     db.execute(delete(DocumentChunk).where(DocumentChunk.document_id == doc.id))
     try:
         pages = extract_pages(data, doc.content_type)
@@ -119,9 +128,13 @@ def set_visibility(db: Session, doc: Document, roles: Iterable[str], actor: User
 
 
 def soft_delete(db: Session, doc: Document) -> None:
-    """Hide immediately and remove indexed text; the encrypted file is purged too."""
+    """Hide immediately and remove indexed text; an uploaded file is purged too.
+
+    The portal never deletes anything in Dropbox."""
     doc.deleted_at = utcnow()
     db.execute(delete(DocumentChunk).where(DocumentChunk.document_id == doc.id))
+    if doc.source != "upload":
+        return
     try:
         get_storage().delete(doc.storage_key)
     except Exception:  # pragma: no cover - storage hiccup shouldn't block the delete

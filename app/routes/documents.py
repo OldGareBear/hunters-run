@@ -2,14 +2,24 @@ from __future__ import annotations
 
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from app.audit import audit
 from app.config import get_settings
-from app.db import get_db
-from app.models import Document, User
+from app.db import get_db, session_factory, utcnow
+from app.dropbox import DropboxError
+from app.models import Document, User, as_utc
 from app.permissions import (
     VISIBILITY_PRESETS,
     Perm,
@@ -18,7 +28,7 @@ from app.permissions import (
 )
 from app.security.auth import require_perm, require_user
 from app.services import documents as doc_service
-from app.storage import get_storage
+from app.services import dropbox_sync
 from app.web import redirect, render
 
 router = APIRouter(prefix="/documents")
@@ -39,15 +49,68 @@ def _manageable(db: Session, user: User, doc_id: int) -> Document:
     return doc
 
 
+IN_DROPBOX = (
+    "This document is managed in Dropbox. To change who can see it, move it to another "
+    "folder there; to remove it, delete it there."
+)
+
+
+def _dropbox_mode() -> bool:
+    return get_settings().document_source == "dropbox"
+
+
+def _dropbox_page(request: Request, db: Session, status_code: int = 200, **ctx):
+    s = get_settings()
+    return render(
+        request,
+        "documents/dropbox.html",
+        status_code,
+        root=s.dropbox_root,
+        folders=[(name, roles) for name, roles in _folder_display()],
+        state=dropbox_sync.last_state(db),
+        **ctx,
+    )
+
+
+def _folder_display() -> list[tuple[str, list[str]]]:
+    import json
+
+    raw = json.loads(get_settings().dropbox_folder_roles)
+    return [(str(name).strip("/"), sorted(set(roles))) for name, roles in raw.items()]
+
+
+def _run_sync(actor_id: int) -> None:
+    db = session_factory()()
+    try:
+        actor = db.get(User, actor_id)
+        dropbox_sync.sync(db, actor=actor)
+    except dropbox_sync.SyncBusy:
+        pass
+    finally:
+        db.close()
+
+
 @router.get("")
 def list_documents(
     request: Request, user: User = Depends(require_user), db: Session = Depends(get_db)
 ):
-    return render(request, "documents/list.html", documents=doc_service.list_visible(db, user))
+    return render(
+        request,
+        "documents/list.html",
+        documents=doc_service.list_visible(db, user),
+        dropbox_mode=_dropbox_mode(),
+        sync_state=dropbox_sync.last_state(db) if _dropbox_mode() else None,
+    )
 
 
 @router.get("/upload")
-def upload_form(request: Request, user: User = Depends(require_perm(Perm.DOCS_UPLOAD))):
+def upload_form(
+    request: Request,
+    user: User = Depends(require_perm(Perm.DOCS_UPLOAD)),
+    db: Session = Depends(get_db),
+):
+    if _dropbox_mode():
+        return _dropbox_page(request, db)
     return render(
         request,
         "documents/upload.html",
@@ -66,6 +129,10 @@ def upload(
     user: User = Depends(require_perm(Perm.DOCS_UPLOAD)),
     db: Session = Depends(get_db),
 ):
+    if _dropbox_mode():
+        return _dropbox_page(
+            request, db, 400, error="Add documents in the Dropbox folder instead of uploading here."
+        )
     limit = get_settings().max_upload_mb * 1024 * 1024
     data = file.file.read(limit + 1)
     try:
@@ -111,6 +178,25 @@ def upload(
     return redirect(f"/documents/{doc.id}", "Uploaded and indexed for the assistant.")
 
 
+@router.post("/sync")
+def sync_now(
+    request: Request,
+    background: BackgroundTasks,
+    user: User = Depends(require_perm(Perm.DOCS_MANAGE)),
+    db: Session = Depends(get_db),
+):
+    if not _dropbox_mode():
+        raise HTTPException(404)
+    state = dropbox_sync.last_state(db)
+    if state and state.locked_until and as_utc(state.locked_until) > utcnow():
+        return redirect("/documents/upload", "A sync is already running.")
+    background.add_task(_run_sync, user.id)
+    return redirect(
+        "/documents/upload",
+        "Checking Dropbox now. New and changed files show up here when it finishes.",
+    )
+
+
 @router.get("/{doc_id}")
 def show(
     request: Request, doc_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
@@ -126,7 +212,12 @@ def download(
     request: Request, doc_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
 ):
     doc = _visible(db, user, doc_id)
-    data = get_storage().get(doc.storage_key)
+    try:
+        data = doc_service.read_bytes(doc)
+    except DropboxError as exc:
+        raise HTTPException(
+            503, "Couldn't fetch this file from Dropbox. Try again shortly."
+        ) from exc
     audit(
         db,
         "document.downloaded",
@@ -157,6 +248,8 @@ def update_visibility(
     db: Session = Depends(get_db),
 ):
     doc = _manageable(db, user, doc_id)
+    if doc.source == "dropbox":
+        return redirect(f"/documents/{doc.id}", IN_DROPBOX, "error")
     before = doc.role_names
     try:
         after = doc_service.set_visibility(db, doc, roles, user)
@@ -181,7 +274,10 @@ def reindex(
     request: Request, doc_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
 ):
     doc = _manageable(db, user, doc_id)
-    doc_service.index_document(db, doc)
+    try:
+        doc_service.index_document(db, doc)
+    except DropboxError as exc:
+        return redirect(f"/documents/{doc.id}", f"Couldn't fetch the file: {exc}", "error")
     audit(
         db,
         "document.reindexed",
@@ -204,6 +300,8 @@ def delete(
     request: Request, doc_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
 ):
     doc = _manageable(db, user, doc_id)
+    if doc.source == "dropbox":
+        return redirect(f"/documents/{doc.id}", IN_DROPBOX, "error")
     doc_service.soft_delete(db, doc)
     audit(
         db,

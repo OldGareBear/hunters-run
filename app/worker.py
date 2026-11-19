@@ -1,4 +1,4 @@
-"""Background worker: delivers the email outbox and prunes expired rows.
+"""Background worker: delivers the email outbox, syncs the Dropbox folder and prunes expired rows.
 
 Run: python -m app.worker            (loops forever)
      python -m app.worker --once     (one pass, e.g. from cron)
@@ -14,6 +14,7 @@ from datetime import timedelta
 
 from sqlalchemy import delete
 
+from app.config import get_settings
 from app.db import session_factory, utcnow
 from app.email.outbox import deliver_pending
 from app.models import LoginAttempt, PasswordReset, UserSession
@@ -35,10 +36,33 @@ def prune(db) -> None:
     db.commit()
 
 
+_last_sync = 0.0
+
+
+def maybe_sync(db, now: float) -> None:
+    """Sync the Dropbox folder every DROPBOX_SYNC_MINUTES (several workers are safe)."""
+    global _last_sync
+    s = get_settings()
+    if s.document_source != "dropbox" or now - _last_sync < s.dropbox_sync_minutes * 60:
+        return
+    _last_sync = now
+    from app.services import dropbox_sync
+
+    try:
+        result = dropbox_sync.sync(db)
+    except dropbox_sync.SyncBusy:
+        return
+    if result.error:
+        log.error("dropbox sync: %s", result.error)
+    else:
+        log.info("dropbox sync: %s", result.summary())
+
+
 def run_once() -> int:
     db = session_factory()()
     try:
         sent = deliver_pending(db)
+        maybe_sync(db, time.monotonic())
         prune(db)
         return sent
     finally:

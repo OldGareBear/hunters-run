@@ -1,6 +1,7 @@
 """Management commands.
 
 python -m app.cli dropbox-auth                 # one-time: get a Dropbox refresh token
+python -m app.cli dropbox-sync                 # check the Dropbox folder now
 python -m app.cli generate-key                 # STORAGE_ENCRYPTION_KEY and SECRET_KEY
 python -m app.cli create-admin you@example.com # first administrator (prompts for password)
 python -m app.cli invite person@example.com homeowner
@@ -73,7 +74,7 @@ def cmd_dropbox_auth(_args) -> None:
 
     import httpx
 
-    from app.storage.dropbox import TOKEN_URL
+    from app.dropbox import TOKEN_URL
 
     s = get_settings()
     app_key = s.dropbox_app_key or input("Dropbox app key: ").strip()
@@ -81,7 +82,8 @@ def cmd_dropbox_auth(_args) -> None:
     query = urlencode(
         {"client_id": app_key, "response_type": "code", "token_access_type": "offline"}
     )
-    print("1. Open this link while signed in to the HOA's Dropbox account and click Allow:")
+    print("1. Open this link while signed in to the Dropbox account that holds the HOA folder,")
+    print("   and click Allow:")
     print(f"   https://www.dropbox.com/oauth2/authorize?{query}")
     code = getpass.getpass("2. Paste the access code Dropbox shows you: ").strip()
     resp = httpx.post(
@@ -94,6 +96,21 @@ def cmd_dropbox_auth(_args) -> None:
         sys.exit(f"Dropbox refused the code ({resp.status_code}): {resp.text[:200]}")
     print("3. Store this as DROPBOX_REFRESH_TOKEN in your secret (it is not shown again):")
     print("   " + resp.json()["refresh_token"])
+
+
+def cmd_dropbox_sync(_args) -> None:
+    from app.services import dropbox_sync
+
+    db = session_factory()()
+    try:
+        result = dropbox_sync.sync(db)
+    except dropbox_sync.SyncBusy as exc:
+        sys.exit(str(exc))
+    if result.error:
+        sys.exit(result.error)
+    print(result.summary())
+    for f in result.failed:
+        print(f"  couldn't read {f['path']}: {f['reason']}")
 
 
 def cmd_create_admin(args) -> None:
@@ -179,6 +196,7 @@ def main() -> None:
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("generate-key").set_defaults(func=cmd_generate_key)
     sub.add_parser("dropbox-auth").set_defaults(func=cmd_dropbox_auth)
+    sub.add_parser("dropbox-sync").set_defaults(func=cmd_dropbox_sync)
     p = sub.add_parser("create-admin")
     p.add_argument("email")
     p.add_argument("--name", default="")

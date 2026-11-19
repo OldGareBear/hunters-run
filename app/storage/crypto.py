@@ -1,4 +1,4 @@
-"""Envelope encryption shared by the storage backends that encrypt client-side.
+"""Envelope encryption for files the portal stores itself (the local backend).
 
 Each object gets a random 256-bit data key. The data key is wrapped with the
 master key (STORAGE_ENCRYPTION_KEY) and both steps use AES-256-GCM with the

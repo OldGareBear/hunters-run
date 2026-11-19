@@ -22,16 +22,6 @@ def _master_key() -> bytes:
 @lru_cache
 def get_storage() -> StorageBackend:
     s = get_settings()
-    if s.storage_backend == "dropbox":
-        from app.storage.dropbox import DropboxStorage
-
-        return DropboxStorage(
-            app_key=s.dropbox_app_key,
-            app_secret=s.dropbox_app_secret,
-            refresh_token=s.dropbox_refresh_token,
-            master_key=_master_key(),
-            root=s.dropbox_root,
-        )
     if s.storage_backend == "s3":
         from app.storage.s3 import S3Storage
 

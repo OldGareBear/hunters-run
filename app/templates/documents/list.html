@@ -3,8 +3,11 @@
 {% block content %}
 <div class="head-row">
   <h1>Documents</h1>
-  {% if has_perm(user, Perm.DOCS_UPLOAD) %}<a class="button primary" href="/documents/upload">Upload</a>{% endif %}
+  {% if has_perm(user, Perm.DOCS_UPLOAD) %}<a class="button primary" href="/documents/upload">{% if dropbox_mode %}Add documents{% else %}Upload{% endif %}</a>{% endif %}
 </div>
+{% if dropbox_mode and has_perm(user, Perm.DOCS_MANAGE) and sync_state and sync_state.last_error %}
+<p class="flash error">The last Dropbox check had a problem: {{ sync_state.last_error }} <a href="/documents/upload">Details</a></p>
+{% endif %}
 <table class="table">
   <thead><tr><th>Title</th><th>Who can see it</th><th>Added</th><th>Status</th></tr></thead>
   <tbody>
