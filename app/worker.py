@@ -39,11 +39,13 @@ def prune(db) -> None:
 _last_sync = 0.0
 
 
-def maybe_sync(db, now: float) -> None:
+def maybe_sync(db, now: float, *, force: bool = False) -> None:
     """Sync the Dropbox folder every DROPBOX_SYNC_MINUTES (several workers are safe)."""
     global _last_sync
     s = get_settings()
-    if s.document_source != "dropbox" or now - _last_sync < s.dropbox_sync_minutes * 60:
+    if s.document_source != "dropbox":
+        return
+    if not force and now - _last_sync < s.dropbox_sync_minutes * 60:
         return
     _last_sync = now
     from app.services import dropbox_sync
@@ -58,11 +60,12 @@ def maybe_sync(db, now: float) -> None:
         log.info("dropbox sync: %s", result.summary())
 
 
-def run_once() -> int:
+def run_once(*, force_sync: bool = False) -> int:
+    """One pass. force_sync syncs Dropbox now, e.g. from a schedule that runs hourly."""
     db = session_factory()()
     try:
         sent = deliver_pending(db)
-        maybe_sync(db, time.monotonic())
+        maybe_sync(db, time.monotonic(), force=force_sync)
         prune(db)
         return sent
     finally:

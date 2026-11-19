@@ -140,6 +140,13 @@ class DropboxClient:
                 f"{API}/files/list_folder/continue", json_body={"cursor": body["cursor"]}
             )
 
+    def temporary_link(self, file_id: str) -> str:
+        """A direct download link for the file that works for 4 hours."""
+        resp = self._call(f"{API}/files/get_temporary_link", json_body={"path": file_id})
+        if resp.status_code != 200:
+            raise self._error(resp, "Download link")
+        return resp.json()["link"]
+
     def download(self, file_id: str) -> bytes:
         resp = self._call(f"{CONTENT}/files/download", arg={"path": file_id})
         if resp.status_code != 200:

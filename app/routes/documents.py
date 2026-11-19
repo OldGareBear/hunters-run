@@ -12,10 +12,11 @@ from fastapi import (
     Request,
     UploadFile,
 )
-from fastapi.responses import Response
+from fastapi.responses import RedirectResponse, Response
 from sqlalchemy.orm import Session
 
 from app.audit import audit
+from app.background import run_later
 from app.config import get_settings
 from app.db import get_db, session_factory, utcnow
 from app.dropbox import DropboxError
@@ -79,10 +80,10 @@ def _folder_display() -> list[tuple[str, list[str]]]:
     return [(str(name).strip("/"), sorted(set(roles))) for name, roles in raw.items()]
 
 
-def _run_sync(actor_id: int) -> None:
+def _run_sync(actor_id: int | None = None) -> None:
     db = session_factory()()
     try:
-        actor = db.get(User, actor_id)
+        actor = db.get(User, actor_id) if actor_id else None
         dropbox_sync.sync(db, actor=actor)
     except dropbox_sync.SyncBusy:
         pass
@@ -190,7 +191,7 @@ def sync_now(
     state = dropbox_sync.last_state(db)
     if state and state.locked_until and as_utc(state.locked_until) > utcnow():
         return redirect("/documents/upload", "A sync is already running.")
-    background.add_task(_run_sync, user.id)
+    run_later(background, "dropbox-sync", _run_sync, actor_id=user.id)
     return redirect(
         "/documents/upload",
         "Checking Dropbox now. New and changed files show up here when it finishes.",
@@ -212,8 +213,15 @@ def download(
     request: Request, doc_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
 ):
     doc = _visible(db, user, doc_id)
+    limit_mb = get_settings().download_redirect_over_mb
+    direct = doc.source == "dropbox" and limit_mb > 0 and doc.size_bytes > limit_mb * 1024 * 1024
     try:
-        data = doc_service.read_bytes(doc)
+        if direct:
+            from app.dropbox import get_dropbox
+
+            link = get_dropbox().temporary_link(doc.source_id)
+        else:
+            data = doc_service.read_bytes(doc)
     except DropboxError as exc:
         raise HTTPException(
             503, "Couldn't fetch this file from Dropbox. Try again shortly."
@@ -227,6 +235,9 @@ def download(
         request=request,
     )
     db.commit()
+    if direct:
+        # Too big to pass through the portal; send the browser to Dropbox's copy.
+        return RedirectResponse(link, 303, headers={"Cache-Control": "private, no-store"})
     disposition = "inline" if doc.content_type == "application/pdf" else "attachment"
     return Response(
         data,

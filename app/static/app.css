@@ -48,6 +48,7 @@ form.inline { display: inline; }
 .flash { padding: .7rem 1rem; border-radius: 8px; margin-bottom: 1rem; background: var(--ok-bg); color: var(--ok); }
 .flash.error { background: var(--err-bg); color: var(--danger); }
 .flash ul { margin: 0; padding-left: 1.1rem; }
+.notice { padding: .8rem 1rem; border-radius: 8px; background: var(--err-bg); color: var(--danger); }
 .table { width: 100%; border-collapse: collapse; background: var(--surface); }
 .table th, .table td { text-align: left; padding: .55rem .6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
 .table th { font-size: .82rem; color: var(--muted); font-weight: 600; }

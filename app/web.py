@@ -131,4 +131,6 @@ def _deliver() -> None:
 
 def kick_outbox(background: BackgroundTasks) -> None:
     if get_settings().email_send_inline:
-        background.add_task(_deliver)
+        from app.background import run_later
+
+        run_later(background, "outbox", _deliver)

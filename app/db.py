@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
+from sqlalchemy.pool import NullPool
 
 from app.config import get_settings
 
@@ -20,8 +21,10 @@ def utcnow() -> datetime:
     return datetime.now(UTC)
 
 
-def make_engine(url: str) -> Engine:
+def make_engine(url: str, *, null_pool: bool = False) -> Engine:
     kwargs: dict = {"pool_pre_ping": True}
+    if null_pool:
+        kwargs = {"poolclass": NullPool}
     if url.startswith("sqlite"):
         kwargs = {"connect_args": {"check_same_thread": False}}
     engine = create_engine(url, **kwargs)
@@ -45,7 +48,8 @@ def configure(url: str | None = None) -> None:
     global _engine, _SessionLocal
     if _engine is not None:
         _engine.dispose()
-    _engine = make_engine(url or get_settings().database_url)
+    s = get_settings()
+    _engine = make_engine(url or s.database_url, null_pool=s.database_null_pool and not url)
     _SessionLocal = sessionmaker(bind=_engine, expire_on_commit=False)
 
 

@@ -1,8 +1,7 @@
 name: CI
 on:
-  push:
-    branches: [main]
   pull_request:
+  workflow_call: # the deploy workflow runs these checks first
 
 permissions:
   contents: read
@@ -40,3 +39,22 @@ jobs:
         run: |
           psql "postgresql://postgres:postgres@localhost:5432/hoa_test" -c "drop schema public cascade; create schema public;"
           alembic upgrade head && alembic check && alembic downgrade base
+
+  infra:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.13.0"
+      - run: terraform fmt -check -recursive infra
+      - name: Validate Terraform
+        run: |
+          for dir in infra/bootstrap infra/app; do
+            terraform -chdir=$dir init -backend=false -input=false
+            terraform -chdir=$dir validate
+          done
+      - name: Build the Lambda image and check it imports
+        run: |
+          docker build -f Dockerfile.lambda --provenance=false -t hoa-portal:ci .
+          docker run --rm --entrypoint python hoa-portal:ci -c "import app.lambda_handler, mangum, app.main; print('ok')"

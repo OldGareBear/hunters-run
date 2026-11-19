@@ -10,6 +10,7 @@ from app.models import Conversation, User
 from app.permissions import Perm, has_perm
 from app.security.auth import require_perm, require_user
 from app.services import chat as chat_service
+from app.services import chat_limits
 from app.services import tickets as ticket_service
 from app.web import kick_outbox, redirect, render
 
@@ -43,7 +44,14 @@ def home(user: User = Depends(require_user)):
 def chat_index(
     request: Request, user: User = Depends(require_perm(Perm.CHAT)), db: Session = Depends(get_db)
 ):
-    return render(request, "chat/chat.html", conversations=_recent(db, user), conv=None)
+    return render(
+        request, "chat/chat.html", conversations=_recent(db, user), conv=None, **_limits(db, user)
+    )
+
+
+def _limits(db: Session, user: User) -> dict:
+    st = chat_limits.status(db, user)
+    return {"limits": st, "show_spend": has_perm(user, Perm.USERS_MANAGE)}
 
 
 @router.post("/chat")
@@ -55,6 +63,9 @@ def start_chat(
 ):
     if not question.strip():
         return redirect("/chat", "Type a question first.", "error")
+    reason = chat_limits.status(db, user).blocked_reason
+    if reason:
+        return redirect("/chat", reason, "error")
     conv = Conversation(user_id=user.id)
     db.add(conv)
     db.flush()
@@ -70,7 +81,9 @@ def show_chat(
     db: Session = Depends(get_db),
 ):
     conv = _own_conversation(db, user, conv_id)
-    return render(request, "chat/chat.html", conversations=_recent(db, user), conv=conv)
+    return render(
+        request, "chat/chat.html", conversations=_recent(db, user), conv=conv, **_limits(db, user)
+    )
 
 
 @router.post("/chat/{conv_id}/ask")
@@ -82,7 +95,10 @@ def ask(
 ):
     conv = _own_conversation(db, user, conv_id)
     if question.strip():
-        chat_service.ask(db, user, conv, question)
+        try:
+            chat_service.ask(db, user, conv, question)
+        except chat_service.LimitReached as exc:
+            return redirect(f"/chat/{conv.id}#latest", str(exc), "error")
     return redirect(f"/chat/{conv.id}#latest")
 
 

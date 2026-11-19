@@ -1,0 +1,13 @@
+# Image for AWS Lambda (see infra/app). Both functions run it; app/lambda_handler.py
+# decides whether an event is an HTTP request or a background task.
+FROM public.ecr.aws/lambda/python:3.12
+ENV PYTHONDONTWRITEBYTECODE=1 PIP_NO_CACHE_DIR=1
+WORKDIR ${LAMBDA_TASK_ROOT}
+COPY pyproject.toml ./
+COPY app ./app
+RUN pip install --target . ".[lambda]" && rm -rf build *.egg-info
+# Copy the source again so templates and static files are exactly what's in the repo.
+COPY app ./app
+COPY migrations ./migrations
+COPY alembic.ini ./
+CMD ["app.lambda_handler.handler"]

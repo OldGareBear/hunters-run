@@ -53,6 +53,9 @@ class Answer:
     citations: list[Citation] = field(default_factory=list)
     model: str = ""
     refused: bool = False
+    input_tokens: int = 0  # everything billed as input, cache reads and writes included
+    output_tokens: int = 0
+    truncated: bool = False
 
 
 class LLM(Protocol):
@@ -97,6 +100,8 @@ class AnthropicLLM:
             "messages": messages,
             "output_config": {"effort": s.anthropic_effort},
         }
+        if not s.anthropic_thinking:
+            kwargs["thinking"] = {"type": "disabled"}
         if s.anthropic_fallbacks:
             kwargs["betas"] = ["server-side-fallback-2026-07-01"]
             kwargs["fallbacks"] = "default"
@@ -113,8 +118,16 @@ class AnthropicLLM:
             log.error("Could not reach the Anthropic API")
             raise
 
+        u = getattr(msg, "usage", None)
+        tokens = {
+            "input_tokens": sum(
+                getattr(u, f, 0) or 0
+                for f in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
+            ),
+            "output_tokens": getattr(u, "output_tokens", 0) or 0,
+        }
         if msg.stop_reason == "refusal":
-            return Answer(REFUSAL_ANSWER, model=msg.model, refused=True)
+            return Answer(REFUSAL_ANSWER, model=msg.model, refused=True, **tokens)
 
         parts: list[str] = []
         citations: list[Citation] = []
@@ -127,7 +140,11 @@ class AnthropicLLM:
                 if idx is not None and 0 <= idx < len(sources):
                     citations.append(Citation(idx, getattr(c, "cited_text", "")))
                     parts.append(f"[[src:{idx}]]")
-        return Answer("".join(parts).strip(), citations, model=msg.model)
+        text = "".join(parts).strip()
+        truncated = msg.stop_reason == "max_tokens"
+        if truncated:
+            text += "\n\n(The answer was cut short. Try a narrower question.)"
+        return Answer(text, citations, model=msg.model, truncated=truncated, **tokens)
 
 
 _WORD = re.compile(r"[a-z0-9]+")

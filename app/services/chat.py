@@ -12,6 +12,7 @@ from app.db import utcnow
 from app.models import ChatMessage, Conversation, User
 from app.rag.llm import NO_SOURCES_ANSWER, get_llm
 from app.rag.retrieval import Source, retrieve
+from app.services import chat_limits
 
 log = logging.getLogger(__name__)
 
@@ -70,8 +71,16 @@ def title_from(question: str) -> str:
     return (q[:77] + "...") if len(q) > 80 else q
 
 
+class LimitReached(Exception):
+    pass
+
+
 def ask(db: Session, user: User, conv: Conversation, question: str) -> ChatMessage:
+    """Answer a question. Raises LimitReached (saving nothing) if a usage limit is hit."""
     s = get_settings()
+    reason = chat_limits.status(db, user).blocked_reason
+    if reason:
+        raise LimitReached(reason)
     question = question.strip()[:4000]
     history = _history(conv, s.rag_history_turns)
     db.add(ChatMessage(conversation_id=conv.id, role="user", content=question))
@@ -94,6 +103,7 @@ def ask(db: Session, user: User, conv: Conversation, question: str) -> ChatMessa
             answered=False,
         )
         db.add(reply)
+        chat_limits.record(db, user)
         db.commit()
         return reply
 
@@ -105,6 +115,7 @@ def ask(db: Session, user: User, conv: Conversation, question: str) -> ChatMessa
             conversation_id=conv.id, role="assistant", content=ERROR_ANSWER, answered=False
         )
         db.add(reply)
+        chat_limits.record(db, user)
         db.commit()
         return reply
 
@@ -121,5 +132,12 @@ def ask(db: Session, user: User, conv: Conversation, question: str) -> ChatMessa
         model=result.model,
     )
     db.add(reply)
+    chat_limits.record(
+        db,
+        user,
+        model=result.model,
+        input_tokens=result.input_tokens,
+        output_tokens=result.output_tokens,
+    )
     db.commit()
     return reply

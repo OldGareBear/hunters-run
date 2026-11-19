@@ -1,0 +1,281 @@
+"""What the AWS Lambda deployment relies on: usage limits, keyword search, the
+Lambda entry point, background hand-off and large downloads."""
+
+from __future__ import annotations
+
+import json
+from datetime import UTC, datetime, timedelta
+
+import httpx
+import pytest
+from sqlalchemy import select
+from sqlalchemy.pool import NullPool
+
+from app import background
+from app.config import get_settings
+from app.db import make_engine
+from app.dropbox import DropboxClient
+from app.models import ChatUsage, Conversation, Document, User
+from app.permissions import Role
+from app.rag.llm import Answer, Citation
+from app.rag.retrieval import retrieve
+from app.services import chat as chat_service
+from app.services import chat_limits
+from app.services import documents as doc_service
+
+POOL = "Pool rules. The pool is open from 10 AM to 8 PM daily. Guests must be accompanied."
+FENCE = "Architectural rules. Fences need board approval and may be at most four feet high."
+SECRET = "Executive session. The board discussed fencing bids and the reserve fund."
+
+
+class FakeLLM:
+    def answer(self, *, question, history, sources):
+        return Answer(
+            "Here.[[src:0]]",
+            [Citation(0, sources[0].text[:20])],
+            model="claude-haiku-5-5",
+            input_tokens=2_000_000,  # big numbers so a few calls cross a small budget
+            output_tokens=200_000,
+        )
+
+
+@pytest.fixture
+def llm(monkeypatch):
+    monkeypatch.setattr(chat_service, "get_llm", lambda: FakeLLM())
+
+
+@pytest.fixture
+def docs(db, make_user):
+    admin = make_user(Role.ADMIN, "admin@example.com")
+    for title, text, roles in [
+        ("Pool rules", POOL, ["board", "management", "homeowner"]),
+        ("Architectural rules", FENCE, ["board", "management", "homeowner"]),
+        ("Executive minutes", SECRET, ["board"]),
+    ]:
+        doc_service.create_document(
+            db,
+            uploader=admin,
+            title=title,
+            description="",
+            filename=f"{title}.txt",
+            data=text.encode(),
+            declared_type="text/plain",
+            roles=roles,
+        )
+    db.commit()
+
+
+@pytest.fixture
+def keyword(monkeypatch):
+    monkeypatch.setattr(get_settings(), "retrieval", "keyword")
+
+
+def _owner(db):
+    return db.scalar(select(User).where(User.role == Role.HOMEOWNER.value))
+
+
+# --- keyword search -----------------------------------------------------------
+def test_keyword_search_finds_stems_and_respects_permissions(db, make_user, docs, keyword):
+    owner = make_user(Role.HOMEOWNER, "owner@example.com")
+    found = retrieve(db, owner, "Can I put up a fence?")
+    assert [s.title for s in found] == ["Architectural rules"]  # "fence" matches "Fences"
+    assert all("Executive" not in s.title for s in retrieve(db, owner, "fencing bids board"))
+    board = make_user(Role.BOARD, "board@example.com")
+    assert "Executive minutes" in [s.title for s in retrieve(db, board, "fencing bids")]
+    assert retrieve(db, owner, "the and of") == []  # only stop words
+
+
+# --- usage limits -------------------------------------------------------------
+def test_daily_limit_per_person(db, make_user, docs, llm, keyword, monkeypatch):
+    monkeypatch.setattr(get_settings(), "chat_daily_limit_per_user", 2)
+    monkeypatch.setattr(get_settings(), "chat_monthly_budget_usd", 0)
+    owner = make_user(Role.HOMEOWNER, "owner@example.com")
+    conv = Conversation(user_id=owner.id)
+    db.add(conv)
+    db.flush()
+    chat_service.ask(db, owner, conv, "pool hours?")
+    chat_service.ask(db, owner, conv, "nothing matches this")  # no sources still counts
+    assert chat_limits.status(db, owner).remaining_today == 0
+    with pytest.raises(chat_service.LimitReached, match="daily limit"):
+        chat_service.ask(db, owner, conv, "fence height?")
+    # Deleting the conversation doesn't reset the count.
+    db.delete(conv)
+    db.commit()
+    assert chat_limits.status(db, owner).remaining_today == 0
+    # Yesterday's questions don't count today.
+    for row in db.scalars(select(ChatUsage)):
+        row.created_at = datetime.now(UTC) - timedelta(days=1, hours=1)
+    db.commit()
+    assert chat_limits.status(db, owner).remaining_today == 2
+
+
+def test_monthly_budget_pauses_the_assistant(db, make_user, docs, llm, keyword, monkeypatch):
+    s = get_settings()
+    monkeypatch.setattr(s, "chat_daily_limit_per_user", 0)
+    monkeypatch.setattr(s, "chat_monthly_budget_usd", 0.50)
+    owner = make_user(Role.HOMEOWNER, "owner@example.com")
+    conv = Conversation(user_id=owner.id)
+    db.add(conv)
+    db.flush()
+    # Each fake answer: 2M input x $0.10 + 0.2M output x $0.50 per million = $0.30.
+    chat_service.ask(db, owner, conv, "pool hours?")
+    assert db.scalar(select(ChatUsage.cost_micros)) == 300_000
+    chat_service.ask(db, owner, conv, "pool guests?")
+    st = chat_limits.status(db, owner)
+    assert st.over_budget and round(st.month_spend_usd, 2) == 0.60
+    with pytest.raises(chat_service.LimitReached, match="paused until"):
+        chat_service.ask(db, owner, conv, "fence?")
+
+
+def test_chat_page_shows_the_pause(client_for, db, docs, llm, keyword, monkeypatch):
+    monkeypatch.setattr(get_settings(), "chat_monthly_budget_usd", 0.01)
+    c = client_for(Role.HOMEOWNER)
+    db.add(ChatUsage(user_id=None, cost_micros=20_000))
+    db.commit()
+    page = c.get("/chat").text
+    assert "paused until" in page and 'name="question"' not in page
+    r = c.post_form("/chat", {"question": "pool?"})
+    assert r.status_code == 303
+    assert db.scalar(select(Conversation).where(Conversation.user_id == c.user.id)) is None
+
+
+def test_admins_see_the_month_spend(client_for, db, monkeypatch):
+    monkeypatch.setattr(get_settings(), "chat_monthly_budget_usd", 5)
+    db.add(ChatUsage(user_id=None, cost_micros=1_230_000))
+    db.commit()
+    assert "$1.23 of $5.00" in client_for(Role.ADMIN).get("/chat").text
+    assert "$1.23" not in client_for(Role.HOMEOWNER).get("/chat").text
+
+
+# --- Lambda entry point and background hand-off -------------------------------
+def test_lambda_tasks_dispatch(monkeypatch):
+    from app import lambda_handler
+
+    calls = []
+    monkeypatch.setattr(lambda_handler, "_worker", lambda: calls.append("worker") or "ok")
+    monkeypatch.setattr(lambda_handler, "_dropbox_sync", lambda a=None: calls.append(a) or "ok")
+    assert lambda_handler.handler({"task": "worker"}, None) == {"task": "worker", "result": "ok"}
+    lambda_handler.handler({"task": "dropbox-sync", "actor_id": "7"}, None)
+    assert calls == ["worker", 7]
+    with pytest.raises(ValueError):
+        lambda_handler.handler({"task": "rm -rf"}, None)
+
+
+def test_lambda_serves_http_through_mangum(monkeypatch):
+    from app import lambda_handler
+
+    monkeypatch.setattr(lambda_handler, "_http_handler", None)
+    event = {
+        "version": "2.0",
+        "routeKey": "$default",
+        "rawPath": "/login",
+        "rawQueryString": "",
+        "headers": {"host": "example.execute-api.us-east-1.amazonaws.com"},
+        "requestContext": {
+            "http": {"method": "GET", "path": "/login", "sourceIp": "203.0.113.9"},
+            "domainName": "example.execute-api.us-east-1.amazonaws.com",
+            "stage": "$default",
+        },
+        "isBase64Encoded": False,
+    }
+    res = lambda_handler.handler(event, None)
+    assert res["statusCode"] == 200 and "Sign in" in res["body"]
+
+
+def test_background_work_goes_to_the_tasks_function(monkeypatch):
+    sent = []
+
+    class FakeLambda:
+        def invoke(self, **kw):
+            sent.append(kw)
+
+    monkeypatch.setattr(get_settings(), "tasks_function_name", "hoa-portal-tasks")
+    monkeypatch.setattr(background, "_lambda_client", lambda: FakeLambda())
+
+    class BG:
+        def add_task(self, fn, *a, **kw):
+            fn(*a, **kw)
+
+    background.run_later(BG(), "dropbox-sync", lambda **_: pytest.fail("ran locally"), actor_id=3)
+    assert sent[0]["FunctionName"] == "hoa-portal-tasks"
+    assert sent[0]["InvocationType"] == "Event"
+    assert json.loads(sent[0]["Payload"]) == {"task": "dropbox-sync", "actor_id": 3}
+
+
+def test_null_pool_for_lambda():
+    assert isinstance(make_engine("postgresql+psycopg://u:p@h/db", null_pool=True).pool, NullPool)
+
+
+# --- large downloads ----------------------------------------------------------
+def test_dropbox_temporary_link():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/oauth2/token"):
+            return httpx.Response(200, json={"access_token": "t", "expires_in": 14400})
+        assert request.url.path.endswith("/files/get_temporary_link")
+        assert json.loads(request.content) == {"path": "id:abc"}
+        return httpx.Response(200, json={"link": "https://dl.dropboxusercontent.com/x"})
+
+    client = DropboxClient(
+        app_key="k", app_secret="s", refresh_token="r", transport=httpx.MockTransport(handler)
+    )
+    assert client.temporary_link("id:abc") == "https://dl.dropboxusercontent.com/x"
+
+
+def test_big_dropbox_files_redirect(client_for, db, docs, monkeypatch):
+    import app.dropbox as dbx
+
+    monkeypatch.setattr(get_settings(), "download_redirect_over_mb", 4)
+
+    class FakeDropbox:
+        def temporary_link(self, file_id):
+            return f"https://dl.dropboxusercontent.com/{file_id}"
+
+        def download(self, file_id):
+            return b"small file"
+
+    monkeypatch.setattr(dbx, "get_dropbox", lambda: FakeDropbox())
+    big, small = db.scalars(select(Document).order_by(Document.id)).all()[:2]
+    for doc, size in ((big, 9 * 1024 * 1024), (small, 1000)):
+        doc.source, doc.source_id, doc.size_bytes = "dropbox", f"id:{doc.id}", size
+    db.commit()
+    c = client_for(Role.HOMEOWNER)
+    r = c.get(f"/documents/{big.id}/download", follow_redirects=False)
+    assert r.status_code == 303
+    assert r.headers["location"] == f"https://dl.dropboxusercontent.com/id:{big.id}"
+    r = c.get(f"/documents/{small.id}/download", follow_redirects=False)
+    assert r.status_code == 200 and r.content == b"small file"
+
+
+def test_lambda_environment_passes_production_checks(monkeypatch):
+    """The settings Terraform gives the Lambda, plus the secret, make a valid production config."""
+    import re
+    from pathlib import Path
+
+    from app.config import Settings
+
+    tf = (Path(__file__).parents[1] / "infra/app/main.tf").read_text()
+    block = tf.split("  env = {", 1)[1].split("\n  }", 1)[0]
+    env = dict(re.findall(r'^\s*([A-Z_]+)\s*=\s*"?([^"\n]*)"?\s*$', block, re.M))
+    env = {
+        k: ("placeholder" if "var." in v or "local." in v or "data." in v else v)
+        for k, v in env.items()
+    }
+    env.update(
+        HOA_TIMEZONE="America/New_York",
+        CHAT_DAILY_LIMIT_PER_USER="20",
+        CHAT_MONTHLY_BUDGET_USD="5",
+        ANTHROPIC_MODEL="claude-haiku-5-5",
+        AWS_SECRETS_MANAGER_SECRET_ID="",
+        # what DEPLOY.md puts in the secret
+        SECRET_KEY="x" * 48,
+        DATABASE_URL="postgresql+psycopg://u:p@db.example/neondb?sslmode=require",
+        DROPBOX_APP_KEY="k",
+        DROPBOX_APP_SECRET="s",
+        DROPBOX_REFRESH_TOKEN="t",
+        ANTHROPIC_API_KEY="sk-placeholder",
+    )
+    assert env["RETRIEVAL"] == "keyword" and env["APP_ENV"] == "production"
+    for k, v in env.items():
+        monkeypatch.setenv(k, v)
+    s = Settings()
+    assert s.is_production and s.retrieval == "keyword" and s.database_null_pool

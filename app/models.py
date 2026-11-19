@@ -15,6 +15,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -195,6 +196,12 @@ class DocumentChunk(Base):
             postgresql_using="hnsw",
             postgresql_ops={"embedding": "vector_cosine_ops"},
         ),
+        # Full-text index for keyword search (Postgres only; see app/rag/retrieval.py).
+        Index(
+            "ix_document_chunks_fts",
+            text("to_tsvector('english', text)"),
+            postgresql_using="gin",
+        ).ddl_if(dialect="postgresql"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -244,6 +251,25 @@ class ChatMessage(Base):
     created_at: Mapped[datetime] = _ts(default=utcnow)
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
+
+
+class ChatUsage(Base):
+    """One row per question put to the assistant, for the usage limits.
+
+    Kept apart from chat_messages so deleting a conversation doesn't reset them.
+    """
+
+    __tablename__ = "chat_usage"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    model: Mapped[str] = mapped_column(String(80), default="")
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0)
+    cost_micros: Mapped[int] = mapped_column(Integer, default=0)  # estimated, USD x 1e6
+    created_at: Mapped[datetime] = _ts(default=utcnow, index=True)
 
 
 class Ticket(Base):

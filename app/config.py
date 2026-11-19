@@ -104,6 +104,13 @@ class Settings(BaseSettings):
     base_url: str = "http://localhost:8000"
     secret_key: str = Field(default=DEV_SECRET, repr=False)
     database_url: str = Field(default="sqlite:///./dev.db", repr=False)
+    # Open a fresh database connection per request instead of keeping a pool. Use it
+    # on AWS Lambda with a database that sleeps when idle (Neon): an idle pooled
+    # connection would go stale while the database sleeps.
+    database_null_pool: bool = False
+    # On AWS Lambda: the function that runs background work (email, Dropbox sync).
+    # When set, the web function hands that work to it instead of doing it in-request.
+    tasks_function_name: str = ""
 
     # --- Sessions & tokens -------------------------------------------------
     session_cookie_name: str = "hoa_session"
@@ -137,6 +144,10 @@ class Settings(BaseSettings):
     )
     dropbox_sync_minutes: int = 10
     dropbox_max_file_mb: int = 50
+    # Send larger downloads straight from Dropbox (a link that works for 4 hours)
+    # instead of through the portal. 0 = never. AWS Lambda responses are capped at
+    # 6 MB, so set this to 4 there.
+    download_redirect_over_mb: int = 0
 
     # Storage for portal uploads (DOCUMENT_SOURCE=upload).
     storage_backend: Literal["local", "s3"] = "local"
@@ -151,6 +162,12 @@ class Settings(BaseSettings):
     s3_endpoint_url: str = ""  # optional, e.g. for S3-compatible stores
     max_upload_mb: int = 25
 
+    # --- Search -------------------------------------------------------------
+    # How the assistant finds passages:
+    #   keyword: Postgres full-text search (word stems, ranked). Needs no other account.
+    #   vector:  embeddings from EMBEDDING_PROVIDER (voyage for real use) and pgvector.
+    retrieval: Literal["keyword", "vector"] = "vector"
+
     # --- Embeddings ---------------------------------------------------------
     embedding_provider: Literal["hashing", "voyage"] = "hashing"
     embedding_dim: int = 1024
@@ -160,10 +177,22 @@ class Settings(BaseSettings):
     # --- Chat / RAG ---------------------------------------------------------
     llm_provider: Literal["anthropic", "offline"] = "anthropic"
     anthropic_api_key: str = _secret()
-    anthropic_model: str = "claude-opus-5-5"
+    # The cheapest current model; answering from a few quoted passages doesn't need more.
+    anthropic_model: str = "claude-haiku-5-5"
     anthropic_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
-    anthropic_max_tokens: int = 4000
-    anthropic_fallbacks: bool = True  # server-side refusal fallback
+    # Extended thinking costs output tokens; answers here are lookups, so it's off.
+    anthropic_thinking: bool = False
+    anthropic_max_tokens: int = 1000  # cap on each answer's output
+    anthropic_fallbacks: bool = False  # server-side refusal fallback (not on Haiku)
+    # Usage limits. Questions per person per day (HOA_TIMEZONE), and a portal-wide
+    # budget per calendar month: once the month's estimated spend reaches it, the
+    # assistant pauses until the 1st and points people to management. 0 = no limit.
+    chat_daily_limit_per_user: int = 20
+    chat_monthly_budget_usd: float = 5.0
+    # Prices used for the estimate, in USD per million tokens. Defaults match
+    # claude-haiku-5-5; update them if you change ANTHROPIC_MODEL.
+    chat_price_input_per_mtok: float = 0.10
+    chat_price_output_per_mtok: float = 0.50
     rag_top_k: int = 8
     rag_min_score: float = 0.15
     rag_history_turns: int = 6
@@ -253,6 +282,11 @@ class Settings(BaseSettings):
             problems.append("ANTHROPIC_API_KEY is required when LLM_PROVIDER=anthropic")
         if self.email_provider == "console":
             problems.append("EMAIL_PROVIDER must be a real provider (smtp, ses or postmark)")
+        if self.retrieval == "vector" and self.embedding_provider == "hashing":
+            problems.append(
+                "EMBEDDING_PROVIDER=hashing is for development; set RETRIEVAL=keyword "
+                "or EMBEDDING_PROVIDER=voyage"
+            )
         if self.embedding_provider == "voyage" and not self.voyage_api_key:
             problems.append("VOYAGE_API_KEY is required when EMBEDDING_PROVIDER=voyage")
         if problems:

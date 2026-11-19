@@ -147,7 +147,8 @@ SOURCES = [
 def test_anthropic_request_shape_and_citation_parsing():
     message = SimpleNamespace(
         stop_reason="end_turn",
-        model="claude-opus-5-5",
+        model="claude-haiku-5-5",
+        usage=SimpleNamespace(input_tokens=1200, output_tokens=80, cache_read_input_tokens=None),
         content=[
             SimpleNamespace(type="thinking", thinking=""),
             SimpleNamespace(
@@ -180,10 +181,13 @@ def test_anthropic_request_shape_and_citation_parsing():
         answer.text == "The pool opens at 10 AM[[src:0]] and quiet hours start at 10 PM.[[src:1]]"
     )
     assert [c.source_index for c in answer.citations] == [0, 1]
+    assert (answer.input_tokens, answer.output_tokens, answer.truncated) == (1200, 80, False)
 
-    assert captured["model"] == "claude-opus-5-5"
+    assert captured["model"] == "claude-haiku-5-5"
     assert "temperature" not in captured
-    assert captured["fallbacks"] == "default"
+    assert "fallbacks" not in captured  # Haiku has no server-side fallback
+    assert captured["thinking"] == {"type": "disabled"}
+    assert captured["max_tokens"] == 1000
     assert captured["output_config"] == {"effort": "medium"}
     content = captured["messages"][-1]["content"]
     docs = [b for b in content if b["type"] == "document"]

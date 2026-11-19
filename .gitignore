@@ -10,3 +10,10 @@ __pycache__/
 var/
 *.db
 *.sqlite3
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+.terraform.lock.hcl
+crash.log

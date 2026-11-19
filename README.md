@@ -109,6 +109,8 @@ Some design notes:
 
   Subfolders take the access of the folder they're in, and you can map deeper folders too (the deepest match wins). Files anywhere else are ignored. To change who can see a file, move it. Admins see everything. Dropbox's own sharing settings have no effect on the portal; only the folder matters.
 - **Local development** doesn't need Dropbox: with `DOCUMENT_SOURCE=upload`, people upload through the portal and files are stored encrypted on disk (or in S3).
+- **Chatbot limits.** Each person can ask `CHAT_DAILY_LIMIT_PER_USER` questions a day (default 20). The portal records the tokens of every answer in `chat_usage` and pauses the assistant for everyone once the month's estimated spend reaches `CHAT_MONTHLY_BUDGET_USD` (default $5), with a message pointing people to management. Admins see the month's spend on the chat page. The default model is Claude Haiku 5.5 with extended thinking off and answers capped at 1,000 tokens. Use a separate Anthropic Console key on prepaid credits with a workspace spend limit as the hard backstop (DEPLOY.md, step 3).
+- **Search.** With `RETRIEVAL=keyword` (the AWS default) the chatbot finds passages with Postgres full-text search, so no embeddings account is needed. With `RETRIEVAL=vector` it uses embeddings (Voyage in production), which also match synonyms.
 - **Secrets.** In production every secret lives in one AWS Secrets Manager secret, loaded at start-up (see `app/config.py`). Secret settings are hidden from logs and error pages.
 
 ## Running it locally
@@ -143,33 +145,20 @@ CI runs both test configurations, checks the migrations and runs the linter on e
 
 ## Deploying
 
-The app refuses to start with `APP_ENV=production` unless the settings are production-safe. That means a real `SECRET_KEY`, secure cookies, Postgres, the Dropbox credentials (or upload storage with its encryption key), a real email provider, and the API keys for the chatbot and embeddings. A reasonable AWS setup:
+**[DEPLOY.md](DEPLOY.md)** sets the portal up on AWS Lambda with a free Neon Postgres database, for about $0.50 a month plus chatbot usage (capped). After a one-time setup, every merge to `main` deploys automatically through GitHub Actions, which signs in to AWS with GitHub's OIDC token instead of stored keys. The infrastructure is Terraform, in `infra/bootstrap` (run once by hand) and `infra/app` (applied by the deploy workflow).
 
-1. **Database.** RDS for PostgreSQL 16 with the `vector` extension. The first migration runs `CREATE EXTENSION IF NOT EXISTS vector`, so the database user needs permission to do that once.
-2. **Documents (Dropbox).**
-   1. In the Dropbox account that will hold the documents, create the folder `/HOA Portal` with the subfolders `Everyone`, `Board and Management`, `Board` and `Management`. A dedicated HOA Dropbox account works best; share the folder with board members so they can add files.
-   2. In the Dropbox App Console, create an app with **Scoped access** and **Full Dropbox** access. Under Permissions, enable only `files.metadata.read` and `files.content.read`. The portal can then read but never change anything. Full Dropbox access lets it reach that account's shared folder, which is another reason to connect a dedicated HOA account rather than someone's personal one.
-   3. Run `python -m app.cli dropbox-auth` on your own computer. It asks for the app key and secret, gives you a link to approve while signed in to that Dropbox account, and prints a refresh token.
-   4. Set `DOCUMENT_SOURCE=dropbox` (and `DROPBOX_ROOT` if you used another folder name). `DROPBOX_APP_KEY`, `DROPBOX_APP_SECRET` and `DROPBOX_REFRESH_TOKEN` go in the secret (step 5). Run the worker so the folder is checked on a schedule, or run `python -m app.cli dropbox-sync` once to import everything straight away.
+The app refuses to start with `APP_ENV=production` unless the settings are production-safe. That means a real `SECRET_KEY`, secure cookies, Postgres, the Dropbox credentials (or upload storage with its encryption key), a real email provider, and the API key for the chatbot. The Dropbox setup is below; DEPLOY.md covers the rest.
 
-3. **Email.** Amazon SES (`EMAIL_PROVIDER=ses`) or Postmark (`EMAIL_PROVIDER=postmark`, using its broadcast stream for announcements). Verify the sending domain and set up SPF, DKIM and DMARC before the first announcement.
-4. **App.** Build the Dockerfile and run it on App Runner, ECS Fargate, Fly.io or Render behind HTTPS. Run `alembic upgrade head` as a release step. Run a second process with `python -m app.worker`, and set `EMAIL_SEND_INLINE=false`.
-5. **Secrets (AWS Secrets Manager).** Create one secret, for example `hoa-portal/production`, whose value is a JSON object:
+### Documents (Dropbox)
 
-   ```json
-   {
-     "SECRET_KEY": "…",
-     "DATABASE_URL": "postgresql+psycopg://…",
-     "DROPBOX_APP_KEY": "…",
-     "DROPBOX_APP_SECRET": "…",
-     "DROPBOX_REFRESH_TOKEN": "…",
-     "ANTHROPIC_API_KEY": "…",
-     "VOYAGE_API_KEY": "…"
-   }
-   ```
+1. In the Dropbox account that will hold the documents, create the folder `/HOA Portal` with the subfolders `Everyone`, `Board and Management`, `Board` and `Management`. A dedicated HOA Dropbox account works best; share the folder with board members so they can add files.
+2. In the Dropbox App Console, create an app with **Scoped access** and **Full Dropbox** access. Under Permissions, enable only `files.metadata.read` and `files.content.read`. The portal can then read but never change anything. Full Dropbox access lets it reach that account's shared folder, which is another reason to connect a dedicated HOA account rather than someone's personal one.
+3. Run `python -m app.cli dropbox-auth` on your own computer. It asks for the app key and secret, gives you a link to approve while signed in to that Dropbox account, and prints a refresh token.
+4. `DROPBOX_APP_KEY`, `DROPBOX_APP_SECRET` and `DROPBOX_REFRESH_TOKEN` go in the secret (DEPLOY.md, step 4). Set `DROPBOX_ROOT` if you used another folder name.
 
-   Add `SMTP_PASSWORD` or `POSTMARK_SERVER_TOKEN` if you use those. Give the app's role `secretsmanager:GetSecretValue` on that one secret (and `kms:Decrypt` if the secret uses a customer-managed key). Then set only non-secret settings in the environment: `APP_ENV=production`, `AWS_SECRETS_MANAGER_SECRET_ID=hoa-portal/production`, `AWS_REGION`, `HOA_NAME`, `BASE_URL`, `SESSION_COOKIE_SECURE=true`, `HOA_TIMEZONE`, `DOCUMENT_SOURCE=dropbox`, `EMBEDDING_PROVIDER=voyage`, `LLM_PROVIDER=anthropic`, `EMAIL_PROVIDER`, `EMAIL_FROM` and `EMAIL_SEND_INLINE=false`. Environment variables override the secret, which is handy for local testing. The secret is read once at start-up, so restart the app after rotating a value.
-6. **First admin.** Run `python -m app.cli create-admin you@example.com` once against the production database. Invite everyone else from the People page.
+### Running it somewhere else
+
+The `Dockerfile` runs the same app as a long-lived server (App Runner, ECS, Fly.io, Render). There, run `alembic upgrade head` as a release step, run `python -m app.worker` as a second process, and set `EMAIL_SEND_INLINE=false`. Postgres needs the `vector` extension, which the first migration creates. Secrets still come from one Secrets Manager secret named by `AWS_SECRETS_MANAGER_SECRET_ID`, and environment variables override it.
 
 ## Security notes
 
@@ -178,4 +167,4 @@ The app refuses to start with `APP_ENV=production` unless the settings are produ
 - **CSRF and headers.** Every form is CSRF-protected. Pages send a strict Content-Security-Policy with no inline scripts.
 - **Files.** Checked by content, not just file name, and size-limited. Encrypted or scanned PDFs without text are listed but can't be searched.
 - **Retention.** When a file is deleted in Dropbox, its text leaves the portal and the chatbot on the next check; the row is kept for the audit trail. Additions, permission changes from moves, and removals are all in the audit log.
-- **Encryption at rest.** Files rely on Dropbox's encryption at rest. The extracted text and embeddings live in Postgres, so use an encrypted RDS instance (the default for new instances).
+- **Encryption at rest.** Files rely on Dropbox's encryption at rest. The extracted text lives in Postgres; Neon encrypts its storage at rest, as RDS does by default.
