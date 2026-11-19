@@ -21,7 +21,7 @@ os.environ.update(
         "EMAIL_SEND_INLINE": "true",
         "STORAGE_BACKEND": "local",
         "LOCAL_STORAGE_DIR": f"{_tmp}/files",
-        "LOCAL_STORAGE_KEY": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
+        "STORAGE_ENCRYPTION_KEY": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
         "BASE_URL": "http://testserver",
         "SECRET_KEY": "test-secret-key-test-secret-key-test",
         "MANAGEMENT_NOTIFY_EMAILS": "office@management.example",

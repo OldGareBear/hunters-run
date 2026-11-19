@@ -1,8 +1,8 @@
 """Storage abstraction for document files.
 
-Every backend must encrypt at rest. S3 uses SSE-KMS; the local backend uses
-envelope encryption with AES-256-GCM. A Dropbox (or other) backend only needs to
-implement these three methods.
+Every backend must encrypt at rest. Dropbox and local storage encrypt in the
+portal before writing (app/storage/crypto.py); S3 uses SSE-KMS. A new backend
+only needs to implement these three methods.
 """
 
 from __future__ import annotations

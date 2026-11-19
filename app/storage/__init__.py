@@ -8,9 +8,30 @@ from app.storage.base import StorageBackend, StorageError
 __all__ = ["StorageBackend", "StorageError", "get_storage"]
 
 
+def _master_key() -> bytes:
+    from app.storage.crypto import DEV_KEY, decode_key
+
+    s = get_settings()
+    if s.storage_encryption_key:
+        return decode_key(s.storage_encryption_key)
+    if s.is_production:  # pragma: no cover - blocked by settings validation too
+        raise StorageError("STORAGE_ENCRYPTION_KEY is required")
+    return DEV_KEY  # development convenience only
+
+
 @lru_cache
 def get_storage() -> StorageBackend:
     s = get_settings()
+    if s.storage_backend == "dropbox":
+        from app.storage.dropbox import DropboxStorage
+
+        return DropboxStorage(
+            app_key=s.dropbox_app_key,
+            app_secret=s.dropbox_app_secret,
+            refresh_token=s.dropbox_refresh_token,
+            master_key=_master_key(),
+            root=s.dropbox_root,
+        )
     if s.storage_backend == "s3":
         from app.storage.s3 import S3Storage
 
@@ -21,13 +42,6 @@ def get_storage() -> StorageBackend:
             prefix=s.s3_prefix,
             endpoint_url=s.s3_endpoint_url,
         )
-    from app.storage.local import LocalEncryptedStorage, decode_key
+    from app.storage.local import LocalEncryptedStorage
 
-    if not s.local_storage_key:
-        if s.is_production:  # pragma: no cover - blocked by settings validation too
-            raise StorageError("LOCAL_STORAGE_KEY is required")
-        # Development convenience: a fixed, clearly-insecure key.
-        key = b"dev-only-insecure-storage-key-32"
-    else:
-        key = decode_key(s.local_storage_key)
-    return LocalEncryptedStorage(s.local_storage_dir, key)
+    return LocalEncryptedStorage(s.local_storage_dir, _master_key())

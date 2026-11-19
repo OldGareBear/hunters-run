@@ -2,7 +2,7 @@
 
 A private, invite-only website for a homeowners association. It has four parts:
 
-- **Document library.** Each document is visible only to the groups it is shared with, and files are encrypted at rest.
+- **Document library.** Each document is visible only to the groups it is shared with. Files are kept in Dropbox, encrypted by the portal before upload.
 - **Chatbot.** It answers questions from the documents the person asking is allowed to read, and cites its sources.
 - **Email announcements.** The board can send them to homeowners, with a preview and an audit trail.
 - **Escalation.** When the chatbot can't help, a homeowner can send the question to management as a ticket, and management can reply.
@@ -43,9 +43,10 @@ The system prompt tells the model to answer only from the provided documents, to
 FastAPI (server-rendered Jinja pages, tiny progressive-enhancement JS)
  ├─ app/security     sessions (hashed tokens in the DB), Argon2id passwords, CSRF, lockout
  ├─ app/permissions  roles → permissions; per-document sharing
- ├─ app/storage      LocalEncryptedStorage (AES-256-GCM envelope) | S3Storage (SSE-KMS)
+ ├─ app/storage      DropboxStorage | LocalEncryptedStorage (both AES-256-GCM envelope) | S3Storage (SSE-KMS)
  ├─ app/ingest       text extraction + chunking
  ├─ app/embeddings   VoyageEmbedder | HashingEmbedder (offline)
+ ├─ app/config.py    settings from env, AWS Secrets Manager, or .env
  ├─ app/rag          permission-filtered retrieval + Claude with citations | OfflineLLM
  ├─ app/email        transactional outbox → Console | SMTP | SES | Postmark
  ├─ app/services     accounts, documents, chat, blasts, tickets
@@ -58,7 +59,8 @@ Some design notes:
 - **Email.** Every email is first written to an `email_messages` outbox table in the same transaction as the action that caused it. The worker then delivers the messages with retries and exponential backoff, so a provider outage never loses an announcement or a ticket notification. Announcements go out as one message per recipient and include a `List-Unsubscribe` header.
 - **Announcements.** The board writes a draft, previews it with an exact recipient count, and confirms by sending that count back. If the audience changed after the preview, the send is refused. Homeowners can opt out of announcements on their account page. A message marked as an official notice (for example, an annual meeting notice) still goes to people who opted out.
 - **Audit log.** Sign-ins, invites, role changes, uploads, downloads, sharing changes, announcements and ticket activity are all recorded and visible at `/admin/audit`.
-- **Storage.** Storage sits behind a small interface (`app/storage/base.py`), so another backend such as Dropbox or Google Drive could be added without touching the rest of the app.
+- **Storage.** Documents live in Dropbox, in the Dropbox app's own folder. Before upload, the portal encrypts each file with its own random key (AES-256-GCM), and that key is in turn encrypted with `STORAGE_ENCRYPTION_KEY`. Files are stored under hashed names. Anyone with access to the Dropbox account sees only opaque, unreadable files, so who can read a document is decided by the portal, never by Dropbox sharing. Storage sits behind a small interface (`app/storage/base.py`); a local backend (for development) and S3 are also included.
+- **Secrets.** In production every secret lives in one AWS Secrets Manager secret, loaded at start-up (see `app/config.py`). Secret settings are hidden from logs and error pages.
 
 ## Running it locally
 
@@ -68,7 +70,7 @@ You need Python 3.12 or newer.
 python -m venv .venv && . .venv/bin/activate
 pip install -e ".[dev]"
 cp .env.example .env
-python -m app.cli generate-key        # paste the output into LOCAL_STORAGE_KEY in .env
+python -m app.cli generate-key        # paste STORAGE_ENCRYPTION_KEY and SECRET_KEY into .env
 alembic upgrade head
 python -m app.cli seed                # demo users and five fictional sample documents
 uvicorn app.main:app --reload
@@ -92,13 +94,34 @@ CI runs both test configurations, checks the migrations and runs the linter on e
 
 ## Deploying
 
-The app refuses to start with `APP_ENV=production` unless the settings are production-safe. That means a real `SECRET_KEY`, secure cookies, Postgres, encrypted storage that is properly configured, a real email provider and Voyage embeddings. A reasonable AWS setup:
+The app refuses to start with `APP_ENV=production` unless the settings are production-safe. That means a real `SECRET_KEY`, secure cookies, Postgres, storage that is fully configured with its encryption key, a real email provider, and the API keys for the chatbot and embeddings. A reasonable AWS setup:
 
 1. **Database.** RDS for PostgreSQL 16 with the `vector` extension. The first migration runs `CREATE EXTENSION IF NOT EXISTS vector`, so the database user needs permission to do that once.
-2. **Documents.** A private S3 bucket with Block Public Access turned on, plus a customer-managed KMS key. Set `STORAGE_BACKEND=s3`, `S3_BUCKET` and `S3_KMS_KEY_ID`. Give the app's role only `s3:GetObject`, `PutObject` and `DeleteObject` on the prefix, and `kms:Encrypt`, `Decrypt` and `GenerateDataKey` on the key.
+2. **Documents (Dropbox).**
+   1. In the Dropbox App Console, create an app with **Scoped access** and **App folder** access, so the portal can only see its own folder. Under Permissions, enable `files.content.read` and `files.content.write`.
+   2. Run `python -m app.cli dropbox-auth` on your own computer. It asks for the app key and secret, gives you a link to approve in the HOA's Dropbox account, and prints a refresh token.
+   3. Run `python -m app.cli generate-key` for `STORAGE_ENCRYPTION_KEY`. Keep a copy somewhere safe outside AWS too: without it the files in Dropbox can't be decrypted.
+   4. Set `STORAGE_BACKEND=dropbox`. `DROPBOX_APP_KEY`, `DROPBOX_APP_SECRET`, `DROPBOX_REFRESH_TOKEN` and `STORAGE_ENCRYPTION_KEY` go in the secret (step 5).
+
+   To use S3 instead, set `STORAGE_BACKEND=s3`, `S3_BUCKET` and `S3_KMS_KEY_ID` (a private bucket with Block Public Access and a customer-managed KMS key).
 3. **Email.** Amazon SES (`EMAIL_PROVIDER=ses`) or Postmark (`EMAIL_PROVIDER=postmark`, using its broadcast stream for announcements). Verify the sending domain and set up SPF, DKIM and DMARC before the first announcement.
 4. **App.** Build the Dockerfile and run it on App Runner, ECS Fargate, Fly.io or Render behind HTTPS. Run `alembic upgrade head` as a release step. Run a second process with `python -m app.worker`, and set `EMAIL_SEND_INLINE=false`.
-5. **Settings and secrets.** Set `HOA_NAME` to your association's name. Put `SECRET_KEY`, `ANTHROPIC_API_KEY`, `VOYAGE_API_KEY` and the email credentials in your platform's secret store, never in the repository.
+5. **Secrets (AWS Secrets Manager).** Create one secret, for example `hoa-portal/production`, whose value is a JSON object:
+
+   ```json
+   {
+     "SECRET_KEY": "…",
+     "DATABASE_URL": "postgresql+psycopg://…",
+     "STORAGE_ENCRYPTION_KEY": "…",
+     "DROPBOX_APP_KEY": "…",
+     "DROPBOX_APP_SECRET": "…",
+     "DROPBOX_REFRESH_TOKEN": "…",
+     "ANTHROPIC_API_KEY": "…",
+     "VOYAGE_API_KEY": "…"
+   }
+   ```
+
+   Add `SMTP_PASSWORD` or `POSTMARK_SERVER_TOKEN` if you use those. Give the app's role `secretsmanager:GetSecretValue` on that one secret (and `kms:Decrypt` if the secret uses a customer-managed key). Then set only non-secret settings in the environment: `APP_ENV=production`, `AWS_SECRETS_MANAGER_SECRET_ID=hoa-portal/production`, `AWS_REGION`, `HOA_NAME`, `BASE_URL`, `SESSION_COOKIE_SECURE=true`, `STORAGE_BACKEND=dropbox`, `EMBEDDING_PROVIDER=voyage`, `LLM_PROVIDER=anthropic`, `EMAIL_PROVIDER`, `EMAIL_FROM` and `EMAIL_SEND_INLINE=false`. Environment variables override the secret, which is handy for local testing. The secret is read once at start-up, so restart the app after rotating a value.
 6. **First admin.** Run `python -m app.cli create-admin you@example.com` once against the production database. Invite everyone else from the People page.
 
 ## Security notes
@@ -107,4 +130,4 @@ The app refuses to start with `APP_ENV=production` unless the settings are produ
 - **Sessions.** Random tokens stored hashed, with HttpOnly and SameSite=Lax cookies. Sessions end when a person is deactivated, their role changes or their password changes.
 - **CSRF and headers.** Every form is CSRF-protected. Pages send a strict Content-Security-Policy with no inline scripts.
 - **Uploads.** Checked by content, not just file name. Size-limited, and encrypted PDFs are rejected.
-- **Retention.** Deleting a document removes its file and its chatbot index right away. The row is kept for the audit trail.
+- **Retention.** Deleting a document removes its file and its chatbot index right away. The row is kept for the audit trail. Dropbox keeps deleted files recoverable for its usual recovery period; they stay encrypted.

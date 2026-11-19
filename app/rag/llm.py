@@ -77,7 +77,7 @@ class AnthropicLLM:
 
         s = get_settings()
         self.settings = s
-        self.client = anthropic.Anthropic(max_retries=3)
+        self.client = anthropic.Anthropic(api_key=s.anthropic_api_key or None, max_retries=3)
 
     def answer(self, *, question: str, history: list[dict], sources: list[Source]) -> Answer:
         import anthropic
