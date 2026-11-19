@@ -1,0 +1,13 @@
+New request #{{ ticket_id }} from {{ requester }} ({{ requester_email }})
+
+Subject: {{ subject_line }}
+{% if details %}
+
+{{ details }}
+{% endif %}
+{% if has_conversation %}
+
+Their conversation with the assistant is attached to the ticket.
+{% endif %}
+
+Open the ticket: {{ link }}

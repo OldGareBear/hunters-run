@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}{{ settings().hoa_name }}{% endblock %} · {{ settings().hoa_name }}</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+<header class="topbar">
+  <a class="brand" href="/">{{ settings().hoa_name }}</a>
+  {% if user %}
+  <nav>
+    {% if has_perm(user, Perm.CHAT) %}<a href="/chat">Ask</a>{% endif %}
+    <a href="/documents">Documents</a>
+    <a href="/tickets">{% if has_perm(user, Perm.TICKETS_HANDLE) %}Tickets{% else %}My requests{% endif %}</a>
+    {% if has_perm(user, Perm.BLASTS_SEND) %}<a href="/blasts">Announcements</a>{% endif %}
+    {% if has_perm(user, Perm.USERS_VIEW) %}<a href="/admin/users">People</a>{% endif %}
+    {% if has_perm(user, Perm.AUDIT_VIEW) %}<a href="/admin/audit">Audit log</a>{% endif %}
+  </nav>
+  <div class="who">
+    <a href="/account">{{ user.display_name }}</a>
+    <span class="pill">{{ role_label(user.role) }}</span>
+    <form method="post" action="/logout" class="inline">{{ csrf_input(request) }}<button class="link">Sign out</button></form>
+  </div>
+  {% endif %}
+</header>
+<main class="{% block main_class %}page{% endblock %}">
+  {% if flash %}<div class="flash {{ flash.kind }}" role="status">{{ flash.text }}</div>{% endif %}
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>

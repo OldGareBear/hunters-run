@@ -1,0 +1,5 @@
+{{ body }}
+
+--
+{% if official %}Official notice from the {{ hoa_name }} board{% else %}Sent by {{ sender_name }} for the {{ hoa_name }} board{% endif %}.
+{% if not official %}To stop receiving announcements, change your email settings: {{ base_url }}/account{% endif %}

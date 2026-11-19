@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Ask management{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>Ask management</h1>
+  {% if conv %}<p class="muted">Your conversation with the assistant is attached, so you don't have to repeat yourself.</p>{% endif %}
+  {% include "_errors.html" %}
+  <form method="post" action="{{ '/chat/%d/escalate' % conv.id if conv else '/tickets' }}">
+    {{ csrf_input(request) }}
+    <label>Subject <input name="subject" maxlength="200" value="{{ subject or '' }}" required></label>
+    <label>Anything else management should know <textarea name="details" rows="6" maxlength="10000">{{ details or '' }}</textarea></label>
+    <button class="primary">Send to management</button>
+  </form>
+</section>
+{% endblock %}

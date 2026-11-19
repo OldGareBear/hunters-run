@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}{{ doc.title }}{% endblock %}
+{% block content %}
+<section class="card">
+  <div class="head-row">
+    <h1>{{ doc.title }}</h1>
+    <a class="button primary" href="/documents/{{ doc.id }}/download">{% if doc.content_type == "application/pdf" %}Open{% else %}Download{% endif %}</a>
+  </div>
+  {% if doc.description %}<p>{{ doc.description }}</p>{% endif %}
+  <dl class="facts">
+    <dt>File</dt><dd>{{ doc.filename }} ({{ (doc.size_bytes / 1024) | round(0) | int }} KB{% if doc.page_count %}, {{ doc.page_count }} pages{% endif %})</dd>
+    <dt>Added</dt><dd>{{ doc.created_at.strftime("%b %-d, %Y") }}{% if doc.uploaded_by %} by {{ doc.uploaded_by.display_name }}{% endif %}</dd>
+    <dt>Assistant</dt><dd>{% if doc.status == "ready" %}Indexed{% elif doc.status == "failed" %}<span class="bad">Not indexed: {{ doc.error }}</span>{% else %}Processing{% endif %}</dd>
+    <dt>Visible to</dt><dd>{% for r in doc.role_names %}<span class="pill">{{ role_label(r) }}</span> {% endfor %}</dd>
+  </dl>
+</section>
+{% if can_manage %}
+<section class="card">
+  <h2>Manage</h2>
+  <form method="post" action="/documents/{{ doc.id }}/visibility">
+    {{ csrf_input(request) }}
+    {% set selected = doc.role_names %}
+    {% include "documents/_roles.html" %}
+    <button>Save visibility</button>
+  </form>
+  <div class="row">
+    <form method="post" action="/documents/{{ doc.id }}/reindex" class="inline">{{ csrf_input(request) }}<button>Re-index</button></form>
+    <form method="post" action="/documents/{{ doc.id }}/delete" class="inline" data-confirm="Delete this document for everyone? This can't be undone.">{{ csrf_input(request) }}<button class="danger">Delete</button></form>
+  </div>
+</section>
+{% endif %}
+{% endblock %}

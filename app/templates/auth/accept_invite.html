@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Create your account{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>Create your account</h1>
+  <p>You were invited as <strong>{{ role_label(invite.role) }}</strong> with <strong>{{ invite.email }}</strong>.</p>
+  {% include "_errors.html" %}
+  <form method="post" action="/invite/{{ token }}">
+    {{ csrf_input(request) }}
+    <label>Your name <input name="full_name" value="{{ full_name or '' }}" autocomplete="name" required></label>
+    <label>Password <input type="password" name="password" autocomplete="new-password" minlength="{{ settings().min_password_length }}" required></label>
+    <label>Confirm password <input type="password" name="password_confirm" autocomplete="new-password" required></label>
+    <p class="muted">At least {{ settings().min_password_length }} characters. A short phrase works well.</p>
+    <button class="primary">Create account</button>
+  </form>
+</section>
+{% endblock %}

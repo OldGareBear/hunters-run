@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Upload a document{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>Upload a document</h1>
+  {% include "_errors.html" %}
+  <form method="post" action="/documents" enctype="multipart/form-data" data-busy="Uploading and indexing...">
+    {{ csrf_input(request) }}
+    <label>File (PDF, Word, .txt or .md, up to {{ max_mb }} MB) <input type="file" name="file" accept=".pdf,.docx,.txt,.md" required></label>
+    <label>Title <input name="title" value="{{ title or '' }}" maxlength="300" placeholder="Defaults to the file name"></label>
+    <label>Description <textarea name="description" rows="2" maxlength="2000">{{ description or '' }}</textarea></label>
+    {% set selected = roles or ["board"] %}
+    {% include "documents/_roles.html" %}
+    <button class="primary">Upload</button>
+  </form>
+</section>
+{% endblock %}

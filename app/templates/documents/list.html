@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Documents{% endblock %}
+{% block content %}
+<div class="head-row">
+  <h1>Documents</h1>
+  {% if has_perm(user, Perm.DOCS_UPLOAD) %}<a class="button primary" href="/documents/upload">Upload</a>{% endif %}
+</div>
+<table class="table">
+  <thead><tr><th>Title</th><th>Who can see it</th><th>Added</th><th>Status</th></tr></thead>
+  <tbody>
+  {% for d in documents %}
+  <tr>
+    <td><a href="/documents/{{ d.id }}">{{ d.title }}</a><div class="muted small">{{ d.filename }}</div></td>
+    <td>{% for r in d.role_names %}<span class="pill">{{ role_label(r) }}</span> {% endfor %}</td>
+    <td>{{ d.created_at.strftime("%b %-d, %Y") }}</td>
+    <td>{% if d.status == "ready" %}Indexed{% elif d.status == "failed" %}<span class="bad">Not indexed</span>{% else %}Processing{% endif %}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="4" class="muted">No documents yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

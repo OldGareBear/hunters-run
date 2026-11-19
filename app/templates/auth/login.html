@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Sign in{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>Sign in</h1>
+  {% include "_errors.html" %}
+  <form method="post" action="/login">
+    {{ csrf_input(request) }}
+    <input type="hidden" name="next" value="{{ next or '/' }}">
+    <label>Email <input type="email" name="email" value="{{ email or '' }}" autocomplete="username" required autofocus></label>
+    <label>Password <input type="password" name="password" autocomplete="current-password" required></label>
+    <button class="primary">Sign in</button>
+  </form>
+  <p class="muted"><a href="/forgot">Forgot your password?</a></p>
+  <p class="muted">Accounts are by invitation. If you live in the community and need access, contact the management office.</p>
+</section>
+{% endblock %}

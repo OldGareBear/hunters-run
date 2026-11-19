@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Choose a new password{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>Choose a new password</h1>
+  {% include "_errors.html" %}
+  <form method="post" action="/reset/{{ token }}">
+    {{ csrf_input(request) }}
+    <label>New password <input type="password" name="password" autocomplete="new-password" required></label>
+    <label>Confirm <input type="password" name="password_confirm" autocomplete="new-password" required></label>
+    <button class="primary">Save password</button>
+  </form>
+</section>
+{% endblock %}

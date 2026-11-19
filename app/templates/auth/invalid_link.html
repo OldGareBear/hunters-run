@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}Link expired{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>This link doesn't work anymore</h1>
+  {% if error %}<p>{{ error }}</p>{% endif %}
+  {% if what == "invite" %}
+  <p>Invites expire after {{ (settings().invite_ttl_hours // 24) }} days and work once. Ask whoever invited you to send a new one.</p>
+  {% else %}
+  <p>Reset links expire quickly and work once. <a href="/forgot">Request a new one</a>.</p>
+  {% endif %}
+</section>
+{% endblock %}

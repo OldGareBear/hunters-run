@@ -1,0 +1,5 @@
+{{ author }} replied on request #{{ ticket_id }}: {{ subject_line }}
+
+{{ body }}
+
+Reply or see the whole thread: {{ link }}
