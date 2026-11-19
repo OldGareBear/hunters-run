@@ -218,9 +218,9 @@ resource "aws_iam_role_policy" "deploy" {
         Resource = local.fn_arns
       },
       {
-        Sid    = "AppRoles"
-        Effect = "Allow"
-        Action = ["iam:CreateRole", "iam:PutRolePolicy", "iam:AttachRolePolicy"]
+        Sid      = "AppRoles"
+        Effect   = "Allow"
+        Action   = ["iam:CreateRole", "iam:PutRolePolicy", "iam:AttachRolePolicy"]
         Resource = local.role_arns
         Condition = {
           StringEquals = { "iam:PermissionsBoundary" = aws_iam_policy.lambda_boundary.arn }
@@ -238,10 +238,10 @@ resource "aws_iam_role_policy" "deploy" {
         Resource = local.role_arns
       },
       {
-        Sid      = "PassAppRoles"
-        Effect   = "Allow"
-        Action   = "iam:PassRole"
-        Resource = local.role_arns
+        Sid       = "PassAppRoles"
+        Effect    = "Allow"
+        Action    = "iam:PassRole"
+        Resource  = local.role_arns
         Condition = { StringEquals = { "iam:PassedToService" = "lambda.amazonaws.com" } }
       },
       {

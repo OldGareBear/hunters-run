@@ -27,28 +27,28 @@ locals {
   # Non-secret settings. The secrets (database URL, API keys, Dropbox) come from the
   # Secrets Manager secret at start-up; see DEPLOY.md for its contents.
   env = {
-    APP_ENV                        = "production"
-    AWS_SECRETS_MANAGER_SECRET_ID  = data.aws_secretsmanager_secret.app.name
-    HOA_NAME                       = var.hoa_name
-    BASE_URL                       = local.base_url
-    SESSION_COOKIE_SECURE          = "true"
-    HOA_TIMEZONE                   = var.hoa_timezone
-    DATABASE_NULL_POOL             = "true"
-    TASKS_FUNCTION_NAME            = local.tasks_function
-    DOCUMENT_SOURCE                = "dropbox"
-    DOWNLOAD_REDIRECT_OVER_MB      = "4"
-    RETRIEVAL                      = "keyword"
-    EMBEDDING_PROVIDER             = "hashing"
-    LLM_PROVIDER                   = "anthropic"
-    ANTHROPIC_MODEL                = var.anthropic_model
-    CHAT_DAILY_LIMIT_PER_USER      = tostring(var.chat_daily_limit_per_user)
-    CHAT_MONTHLY_BUDGET_USD        = tostring(var.chat_monthly_budget_usd)
-    EMAIL_PROVIDER                 = "ses"
-    SES_REGION                     = local.region
-    EMAIL_FROM                     = var.email_from
-    EMAIL_SEND_INLINE              = "true"
-    MANAGEMENT_NOTIFY_EMAILS       = var.management_notify_emails
-    PYTHONDONTWRITEBYTECODE        = "1"
+    APP_ENV                       = "production"
+    AWS_SECRETS_MANAGER_SECRET_ID = data.aws_secretsmanager_secret.app.name
+    HOA_NAME                      = var.hoa_name
+    BASE_URL                      = local.base_url
+    SESSION_COOKIE_SECURE         = "true"
+    HOA_TIMEZONE                  = var.hoa_timezone
+    DATABASE_NULL_POOL            = "true"
+    TASKS_FUNCTION_NAME           = local.tasks_function
+    DOCUMENT_SOURCE               = "dropbox"
+    DOWNLOAD_REDIRECT_OVER_MB     = "4"
+    RETRIEVAL                     = "keyword"
+    EMBEDDING_PROVIDER            = "hashing"
+    LLM_PROVIDER                  = "anthropic"
+    ANTHROPIC_MODEL               = var.anthropic_model
+    CHAT_DAILY_LIMIT_PER_USER     = tostring(var.chat_daily_limit_per_user)
+    CHAT_MONTHLY_BUDGET_USD       = tostring(var.chat_monthly_budget_usd)
+    EMAIL_PROVIDER                = "ses"
+    SES_REGION                    = local.region
+    EMAIL_FROM                    = var.email_from
+    EMAIL_SEND_INLINE             = "true"
+    MANAGEMENT_NOTIFY_EMAILS      = var.management_notify_emails
+    PYTHONDONTWRITEBYTECODE       = "1"
   }
 }
 
