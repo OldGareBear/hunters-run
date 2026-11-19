@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import select
 
+from app.amenities import parse_amenities
 from app.config import get_settings
 from app.models import EmailMessage, Reservation
 from app.permissions import Role
@@ -49,73 +51,61 @@ def refused(db, user, space, start, minutes=60, now=MONDAY_6AM, **kw) -> str:
     return str(exc.value)
 
 
-# --- Tennis rules ----------------------------------------------------------------
+# --- Tennis rules (default: one court) ----------------------------------------------
 
 
 def test_tennis_booking_is_confirmed_and_takes_the_slot(db, owner):
     a, b = owner("a@example.com", "1A"), owner("b@example.com", "2B")
-    r = book(db, a, "tennis-1", L(1, 7))
+    r = book(db, a, "tennis", L(1, 7))
     assert r.status == "confirmed" and r.household == "unit:1a"
-    assert "already booked" in refused(db, b, "tennis-1", L(1, 7, 30))
-    assert book(db, b, "tennis-2", L(1, 7)).status == "confirmed"
+    assert "already booked" in refused(db, b, "tennis", L(1, 7, 30))
+    assert book(db, b, "tennis", L(1, 8)).status == "confirmed"
 
 
-def test_no_back_to_back_bookings_on_any_court(db, owner):
+def test_one_court_one_booking_a_day_and_three_a_week(db, owner):
     a = owner("a@example.com", "1A")
-    book(db, a, "tennis-1", L(1, 7))  # 7:00 to 8:00
-    assert "back-to-back" in refused(db, a, "tennis-2", L(1, 8))
-    assert "back-to-back" in refused(db, a, "tennis-1", L(1, 9, 30))
-    assert "already has a booking then" in refused(db, a, "tennis-2", L(1, 7, 30))
-    assert book(db, a, "tennis-1", L(1, 10)).status == "confirmed"  # exactly 2 hours later
+    book(db, a, "tennis", L(1, 7))
+    assert "used its 1 booking" in refused(db, a, "tennis", L(1, 18))
+    book(db, a, "tennis", L(2, 7))
+    assert "upcoming" in refused(db, a, "tennis", L(3, 7))  # two upcoming already
+    later = L(2, 20)  # both are over
+    book(db, a, "tennis", L(3, 7), now=later)
+    msg = refused(db, a, "tennis", L(4, 7), now=L(3, 20))
+    assert "3 bookings" in msg and "week of March 1" in msg
+    assert book(db, a, "tennis", L(8, 7), now=L(3, 20)).status == "confirmed"  # next week
 
 
 def test_people_in_one_unit_share_the_limits(db, owner):
     a1, a2 = owner("a1@example.com", "12B"), owner("a2@example.com", " 12b ")
-    book(db, a1, "tennis-1", L(1, 7))
-    assert "back-to-back" in refused(db, a2, "tennis-2", L(1, 8))
-    book(db, a2, "tennis-2", L(1, 18))
-    assert "upcoming" in refused(db, a1, "tennis-1", L(2, 7))  # two upcoming already
+    book(db, a1, "tennis", L(1, 7))
+    assert "used its 1 booking" in refused(db, a2, "tennis", L(1, 18))
     # Without a unit, each person is their own household.
     solo = owner("solo@example.com")
-    assert book(db, solo, "tennis-1", L(1, 8)).household == f"user:{solo.id}"
-
-
-def test_weekly_limit_counts_monday_to_sunday(db, owner):
-    a = owner("a@example.com", "1A")
-    book(db, a, "tennis-1", L(1, 7))
-    book(db, a, "tennis-1", L(1, 18))
-    later = L(1, 20)  # both are over, so the upcoming limit no longer applies
-    book(db, a, "tennis-1", L(2, 7), now=later)
-    book(db, a, "tennis-1", L(2, 18), now=later)
-    msg = refused(db, a, "tennis-1", L(3, 7), now=L(2, 20))
-    assert "4 bookings" in msg and "week of March 1" in msg
-    assert book(db, a, "tennis-1", L(8, 7), now=L(2, 20)).status == "confirmed"  # next week
+    assert book(db, solo, "tennis", L(1, 8)).household == f"user:{solo.id}"
 
 
 def test_late_cancellation_still_counts_toward_the_daily_limit(db, owner):
     a = owner("a@example.com", "1A")
-    book(db, a, "tennis-1", L(1, 7))
-    evening = book(db, a, "tennis-1", L(1, 18))
+    evening = book(db, a, "tennis", L(1, 18))
     svc.cancel(db, evening, by=a, now=L(1, 17))  # an hour before: late
     db.commit()
     assert evening.counts_after_cancel
-    assert "used its 2 bookings" in refused(db, a, "tennis-2", L(1, 20), now=L(1, 17))
+    assert "used its 1 booking" in refused(db, a, "tennis", L(1, 20), now=L(1, 17))
 
 
 def test_early_cancellation_frees_the_limit(db, owner):
     a = owner("a@example.com", "1A")
-    book(db, a, "tennis-1", L(1, 7))
-    evening = book(db, a, "tennis-1", L(1, 18))
+    evening = book(db, a, "tennis", L(1, 18))
     svc.cancel(db, evening, by=a, now=L(1, 12))
     db.commit()
     assert not evening.counts_after_cancel
-    assert book(db, a, "tennis-2", L(1, 20), now=L(1, 12)).status == "confirmed"
+    assert book(db, a, "tennis", L(1, 19), now=L(1, 12)).status == "confirmed"
 
 
 @pytest.mark.parametrize(
     ("start", "minutes", "message"),
     [
-        (L(1, 6, 30), 60, "open 7:00 AM to 9:00 PM"),
+        (L(1, 6, 30), 60, "The tennis court is open 7:00 AM to 9:00 PM"),
         (L(1, 20, 30), 60, "open 7:00 AM to 9:00 PM"),
         (L(1, 7, 15), 60, "start every 30 minutes"),
         (L(1, 7), 45, "steps of 30 minutes"),
@@ -128,19 +118,57 @@ def test_early_cancellation_frees_the_limit(db, owner):
 def test_tennis_time_rules(db, owner, start, minutes, message):
     a = owner("a@example.com", "1A")
     now = L(1, 7, 10) if "passed" in message else MONDAY_6AM
-    assert message in refused(db, a, "tennis-1", start, minutes, now=now)
+    assert message in refused(db, a, "tennis", start, minutes, now=now)
+
+
+# --- Groups with several spaces (e.g. an HOA with two courts) ------------------------
+
+
+@pytest.fixture
+def two_courts(monkeypatch):
+    groups = parse_amenities(
+        json.dumps(
+            {
+                "tennis": {
+                    "label": "Tennis courts",
+                    "spaces": {"court-1": "Court 1", "court-2": "Court 2"},
+                }
+            }
+        )
+    )
+    monkeypatch.setattr(svc, "groups", lambda: groups)
+
+
+def test_no_back_to_back_bookings_on_any_court(db, owner, two_courts):
+    a, b = owner("a@example.com", "1A"), owner("b@example.com", "2B")
+    book(db, a, "court-1", L(1, 7))  # 7:00 to 8:00
+    assert book(db, b, "court-2", L(1, 12)).status == "confirmed"
+    assert "back-to-back" in refused(db, a, "court-2", L(1, 8))
+    assert "back-to-back" in refused(db, a, "court-1", L(1, 9, 30))
+    assert "already has a booking then" in refused(db, a, "court-2", L(1, 7, 30))
+    assert book(db, a, "court-1", L(1, 10)).status == "confirmed"  # exactly 2 hours later
+    assert "used its 2 bookings" in refused(db, a, "court-2", L(1, 18), now=L(1, 12))
+
+
+def test_limits_count_across_courts(db, owner, two_courts):
+    a = owner("a@example.com", "1A")
+    book(db, a, "court-1", L(1, 7))
+    book(db, a, "court-2", L(1, 18))
+    msg = refused(db, a, "court-1", L(2, 7))
+    assert "2 upcoming bookings for the tennis courts" in msg
+    assert "Tennis courts are open" in refused(db, a, "court-1", L(3, 6))
 
 
 def test_cancel_is_limited_to_the_household_and_management(db, owner, make_user):
     a, b = owner("a@example.com", "1A"), owner("b@example.com", "2B")
     partner = owner("a2@example.com", "1a")
     mgr = make_user(Role.MANAGEMENT, "manager@example.com")
-    r = book(db, a, "tennis-1", L(1, 7))
+    r = book(db, a, "tennis", L(1, 7))
     with pytest.raises(svc.ReservationError):
         svc.cancel(db, r, by=b, now=MONDAY_6AM)
     svc.cancel(db, r, by=partner, now=MONDAY_6AM)
     assert r.status == "cancelled"
-    r2 = book(db, a, "tennis-1", L(1, 10))
+    r2 = book(db, a, "tennis", L(2, 10))
     svc.cancel(db, r2, by=mgr, reason="Court repairs", now=MONDAY_6AM)
     db.commit()
     mail = db.scalars(select(EmailMessage).where(EmailMessage.kind == "reservation")).one()
@@ -192,14 +220,14 @@ def test_declined_request_frees_the_time(db, owner, make_user):
 def test_management_can_close_a_space_but_not_over_bookings(db, owner, make_user):
     mgr = make_user(Role.MANAGEMENT, "manager@example.com")
     a = owner("a@example.com", "1A")
-    book(db, a, "tennis-1", L(2, 7))
+    book(db, a, "tennis", L(2, 7))
     assert "Cancel them first" in refused(
-        db, mgr, "tennis-1", L(2, 7), 240, block=True, purpose="Resurfacing"
+        db, mgr, "tennis", L(2, 7), 240, block=True, purpose="Resurfacing"
     )
-    closure = book(db, mgr, "tennis-1", L(3, 7), 240, block=True, purpose="Resurfacing")
+    closure = book(db, mgr, "tennis", L(3, 7), 240, block=True, purpose="Resurfacing")
     assert closure.kind == "block" and closure.status == "confirmed"
-    assert "already booked" in refused(db, a, "tennis-1", L(3, 9))
-    assert "Only management" in refused(db, a, "tennis-1", L(4, 7), block=True, purpose="x")
+    assert "already booked" in refused(db, a, "tennis", L(3, 9))
+    assert "Only management" in refused(db, a, "tennis", L(4, 7), block=True, purpose="x")
 
 
 # --- Pages and permissions -----------------------------------------------------------
@@ -218,9 +246,9 @@ def test_booking_through_the_pages_and_privacy(client_for, db):
     other = client_for(Role.HOMEOWNER, "other@example.com")
     mgr = client_for(Role.MANAGEMENT, "manager@example.com")
 
-    form = owner.get(f"/reservations/tennis-1/new?start={_tomorrow(10)}")
+    form = owner.get(f"/reservations/tennis/new?start={_tomorrow(10)}")
     assert form.status_code == 200 and "1 hour 30 minutes" in form.text
-    resp = owner.post_form("/reservations/tennis-1", {"start": _tomorrow(10), "minutes": "60"})
+    resp = owner.post_form("/reservations/tennis", {"start": _tomorrow(10), "minutes": "60"})
     assert resp.status_code == 303
     r = db.scalar(select(Reservation))
     assert r.status == "confirmed"
@@ -231,8 +259,8 @@ def test_booking_through_the_pages_and_privacy(client_for, db):
     assert "7C" in mgr.get(week).text
 
     # Rule errors come back on the form.
-    again = owner.post_form("/reservations/tennis-2", {"start": _tomorrow(11), "minutes": "60"})
-    assert again.status_code == 400 and "back-to-back" in again.text
+    again = owner.post_form("/reservations/tennis", {"start": _tomorrow(15), "minutes": "60"})
+    assert again.status_code == 400 and "used its 1 booking" in again.text
 
     assert other.get(f"/reservations/r/{r.id}").status_code == 404
     assert other.post_form(f"/reservations/r/{r.id}/cancel").status_code == 404
@@ -243,7 +271,7 @@ def test_booking_through_the_pages_and_privacy(client_for, db):
 
 def test_homeowners_cannot_block_or_approve(client_for, db):
     owner = client_for(Role.HOMEOWNER, "owner@example.com")
-    assert "Tennis court 2" in owner.get("/reservations").text
+    assert "Tennis court" in owner.get("/reservations").text
     page = owner.get("/reservations/clubhouse")
     assert page.status_code == 200
     assert 'small">10:00 PM</th>' in page.text and 'small">11:00 PM</th>' not in page.text
@@ -252,7 +280,7 @@ def test_homeowners_cannot_block_or_approve(client_for, db):
     )
     assert owner.get("/reservations/no-such-court").status_code == 404
     data = {"start": _tomorrow(10), "minutes": "60", "block": "1", "purpose": "x"}
-    assert owner.post_form("/reservations/tennis-1", data).status_code == 403
+    assert owner.post_form("/reservations/tennis", data).status_code == 403
     assert owner.get("/reservations/manage").status_code == 403
     assert owner.post_form("/reservations/r/1/decide", {"decision": "approve"}).status_code == 403
 

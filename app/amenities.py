@@ -96,13 +96,17 @@ class AmenityGroup:
 
 DEFAULT_AMENITIES = {
     "tennis": {
-        "label": "Tennis courts",
-        "spaces": {"tennis-1": "Tennis court 1", "tennis-2": "Tennis court 2"},
+        "label": "Tennis court",
+        "spaces": {"tennis": "Tennis court"},
         "description": "Book up to 90 minutes. Bookings are confirmed straight away.",
         "notes": [
-            "The courts are for tennis and basketball only.",
-            "No bikes, skates or pets on the courts.",
+            "The court is for tennis and basketball only.",
+            "No bikes, skates or pets on the court.",
         ],
+        # One court is about 14 hours of play a day, so one booking a day per household
+        # keeps evenings and weekends from going to the same few households.
+        "max_per_day": 1,
+        "max_per_week": 3,
     },
     "clubhouse": {
         "label": "Clubhouse",

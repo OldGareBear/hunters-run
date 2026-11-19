@@ -6,7 +6,7 @@ A private, invite-only website for a homeowners association. It has five parts:
 - **Chatbot.** It answers questions from the documents the person asking is allowed to read, and cites its sources.
 - **Email announcements.** The board can send them to homeowners, with a preview and an audit trail.
 - **Escalation.** When the chatbot can't help, a homeowner can send the question to management as a ticket, and management can reply.
-- **Amenity booking.** Households book the tennis courts from a weekly calendar, under limits that keep things fair, and request the clubhouse, which management approves.
+- **Amenity booking.** Households book the tennis court from a weekly calendar, under limits that keep things fair, and request the clubhouse, which management approves.
 
 Nothing in this repository talks to a paid service unless you configure it. By default it uses an offline chatbot, offline embeddings and console email, so you can run it locally without any API keys.
 
@@ -42,18 +42,18 @@ The system prompt tells the model to answer only from the provided documents, to
 
 ## Amenity booking
 
-People pick a free slot on a week calendar (`/reservations`). Every limit is per **household**: people whose accounts have the same unit (set on the People page or in the invite) share one set of limits. Someone with no unit counts as their own household. Limits also count across every space in a group, so a household can't get round them by booking the other court.
+People pick a free slot on a week calendar (`/reservations`). Every limit is per **household**: people whose accounts have the same unit (set on the People page or in the invite) share one set of limits. Someone with no unit counts as their own household. Limits also count across every space in a group, so if you add a second court, a household can't get round them by booking the other one.
 
 The default rules, all configurable:
 
-| Rule | Tennis courts | Clubhouse |
+| Rule | Tennis court | Clubhouse |
 |---|---|---|
-| Spaces | Court 1, Court 2 | Clubhouse |
+| Spaces | one court | Clubhouse |
 | Hours | 7:00 AM to 9:00 PM | 8:00 AM to 11:00 PM |
 | Start times and lengths | every 30 minutes; 60 or 90 minutes | on the hour; 2 to 8 hours |
 | How far ahead | up to 7 days | 14 to 180 days ahead |
 | Upcoming bookings a household can hold | 2 | 1 |
-| Per day / per week (Mon to Sun) | 2 / 4 | 1 / no limit |
+| Per day / per week (Mon to Sun) | 1 / 3 | 1 / no limit |
 | No back-to-back | at least 2 hours between a household's bookings | none |
 | Late cancellations | cancelling within 2 hours of the start still counts toward the daily and weekly limits | no effect |
 | Confirmation | instant | management approves or declines, with a note (fees, deposit, rules) emailed to the household |
@@ -65,11 +65,11 @@ Change the rules with two settings:
 - `HOA_TIMEZONE` (default `America/New_York`): opening hours, days and weeks are in this time zone.
 - `AMENITIES`: a JSON object of amenity groups. Each group has `label`, `spaces` (slug → name), optional `description` and `notes` (shown with the rules), and any of the rule keys `open`, `close`, `slot_minutes`, `min_minutes`, `max_minutes`, `book_ahead_days`, `min_notice_minutes`, `max_upcoming`, `max_per_day`, `max_per_week`, `gap_minutes`, `late_cancel_minutes`, `requires_approval` and `ask_purpose`. Leave a key out to use the default; set a limit to `null` for no limit. The full defaults are in `app/amenities.py`. Settings are checked at start-up, so a typo stops the app instead of being ignored.
 
-For example, one court with one-hour bookings and no weekly cap:
+With one court, a household can book once a day, so the 2-hour gap only starts to matter if you allow more. For example, two courts with two bookings a day each (the gap then stops a household playing back to back on either court):
 
 ```json
-{"tennis": {"label": "Tennis court", "spaces": {"tennis": "Tennis court"},
-            "slot_minutes": 60, "min_minutes": 60, "max_minutes": 60, "max_per_week": null}}
+{"tennis": {"label": "Tennis courts", "spaces": {"court-1": "Court 1", "court-2": "Court 2"},
+            "max_per_day": 2, "max_per_week": 4}}
 ```
 
 ## Architecture
