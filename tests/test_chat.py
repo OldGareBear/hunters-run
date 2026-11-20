@@ -146,6 +146,25 @@ def test_llm_failure_is_handled(client_for, docs, monkeypatch, db):
     assert db.scalar(select(func.count(ChatUsage.id))) == 0  # doesn't use up a question
 
 
+def test_answers_abandoned_at_the_deadline_still_count(client_for, docs, monkeypatch, db):
+    from app.config import get_settings
+    from app.rag.llm import AnswerTookTooLong
+
+    class Slow:
+        def answer(self, **_):
+            raise AnswerTookTooLong(model="m", input_tokens=6000, output_tokens=1000)
+
+    monkeypatch.setattr(chat_service, "get_llm", lambda: Slow())
+    monkeypatch.setattr(get_settings(), "chat_daily_limit_per_user", 2)
+    owner = client_for(Role.HOMEOWNER)
+    for _ in range(3):
+        owner.post_form("/chat", {"question": "When is the pool open?"})
+    rows = db.scalars(select(ChatUsage)).all()
+    assert len(rows) == 2 and rows[0].output_tokens == 1000 and rows[0].cost_micros > 0
+    page = owner.get("/chat")
+    assert "daily limit" in page.text
+
+
 def test_offline_llm_end_to_end(client_for, docs, db):
     owner = client_for(Role.HOMEOWNER)
     resp = owner.post_form("/chat", {"question": "What hours is the pool open?"})

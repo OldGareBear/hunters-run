@@ -246,8 +246,10 @@ def test_a_slow_stream_is_abandoned_before_the_request_time_limit(monkeypatch):
 
     message = SimpleNamespace(stop_reason="end_turn", model="m", usage=None, content=[])
     client, _ = _fake_anthropic(message, events=trickle())
-    with pytest.raises(llm_module.AnswerTookTooLong):
+    with pytest.raises(llm_module.AnswerTookTooLong) as slow:
         _llm_with(client).answer(question="x", history=[], sources=SOURCES)
+    # no usage seen yet: the worst case is counted, since Anthropic bills what it made
+    assert slow.value.output_tokens == 1000
     assert clock[0] - 1000.0 <= llm_module.ANSWER_DEADLINE_SECONDS + 4  # stopped at once
     assert client.stream_class.closed  # the connection is let go
 

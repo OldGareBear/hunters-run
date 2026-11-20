@@ -98,6 +98,9 @@ jobs:
             jq -r '.LogResult' invoke.json | base64 -d
             exit 1
           fi
+          if grep -q 'newer than this code' result.json; then
+            echo "::warning::The database is at a newer migration than this code, so no migration ran. Fine for a rollback; if this change adds a migration, see DEPLOY.md, Rolling back."
+          fi
 
       - name: Apply infrastructure
         working-directory: infra/app

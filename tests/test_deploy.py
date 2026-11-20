@@ -430,3 +430,10 @@ def test_migrations_run_before_the_web_function_changes():
     invoke = steps[migrate]
     assert invoke["env"]["AWS_MAX_ATTEMPTS"] == "1"  # no second, overlapping migration
     assert "--cli-read-timeout 900" in invoke["run"]
+
+
+def test_deploy_warns_when_no_migration_ran():
+    from pathlib import Path
+
+    wf = (Path(__file__).parents[1] / ".github/workflows/deploy.yml").read_text()
+    assert "newer than this code" in wf and "::warning::" in wf

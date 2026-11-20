@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.config import get_settings
 from app.db import utcnow
 from app.models import ChatMessage, Conversation, User
-from app.rag.llm import NO_SOURCES_ANSWER, get_llm
+from app.rag.llm import NO_SOURCES_ANSWER, AnswerTookTooLong, get_llm
 from app.rag.retrieval import Source, retrieve
 from app.services import chat_limits
 
@@ -109,6 +109,22 @@ def ask(db: Session, user: User, conv: Conversation, question: str) -> ChatMessa
 
     try:
         result = get_llm().answer(question=question, history=history, sources=sources)
+    except AnswerTookTooLong as slow:
+        # Billed even though nobody saw it, so it counts like an answer: otherwise slow
+        # answers could be repeated without limit past the budget.
+        reply = ChatMessage(
+            conversation_id=conv.id, role="assistant", content=ERROR_ANSWER, answered=False
+        )
+        db.add(reply)
+        chat_limits.record(
+            db,
+            user,
+            model=slow.model,
+            input_tokens=slow.input_tokens,
+            output_tokens=slow.output_tokens,
+        )
+        db.commit()
+        return reply
     except Exception:
         log.exception("LLM call failed")
         reply = ChatMessage(

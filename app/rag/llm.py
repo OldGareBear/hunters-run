@@ -76,7 +76,27 @@ def _document_blocks(sources: list[Source]) -> list[dict]:
 
 
 class AnswerTookTooLong(Exception):
-    """The answer was still streaming at the deadline."""
+    """The answer was still streaming at the deadline.
+
+    Anthropic still bills what was generated, so the tokens so far travel with the
+    error and the caller counts them against the limits.
+    """
+
+    def __init__(self, *, model: str = "", input_tokens: int = 0, output_tokens: int = 0):
+        super().__init__("answer still streaming at the deadline")
+        self.model = model
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+
+
+def _usage_tokens(u) -> dict:
+    return {
+        "input_tokens": sum(
+            getattr(u, f, 0) or 0
+            for f in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
+        ),
+        "output_tokens": getattr(u, "output_tokens", 0) or 0,
+    }
 
 
 # API Gateway gives up on a request after 29 seconds, so a slow or overloaded API must
@@ -133,10 +153,14 @@ class AnthropicLLM:
             with self.client.beta.messages.stream(**kwargs) as stream:
                 for _event in stream:
                     if time.monotonic() > deadline:
-                        # Leaving the block closes the connection. The tokens used so
-                        # far aren't counted, like any other failed call.
+                        # Leaving the block closes the connection. What was generated
+                        # is still billed, so report it; if the stream gave no usage
+                        # yet, assume the worst (a full answer).
                         log.error("Anthropic answer still streaming after the deadline")
-                        raise AnswerTookTooLong()
+                        snap = getattr(stream, "current_message_snapshot", None)
+                        used = _usage_tokens(getattr(snap, "usage", None))
+                        used["output_tokens"] = used["output_tokens"] or s.anthropic_max_tokens
+                        raise AnswerTookTooLong(model=s.anthropic_model, **used)
                 msg = stream.get_final_message()
         except anthropic.RateLimitError:
             log.warning("Anthropic rate limit hit")
@@ -148,14 +172,7 @@ class AnthropicLLM:
             log.error("Could not reach the Anthropic API")
             raise
 
-        u = getattr(msg, "usage", None)
-        tokens = {
-            "input_tokens": sum(
-                getattr(u, f, 0) or 0
-                for f in ("input_tokens", "cache_read_input_tokens", "cache_creation_input_tokens")
-            ),
-            "output_tokens": getattr(u, "output_tokens", 0) or 0,
-        }
+        tokens = _usage_tokens(getattr(msg, "usage", None))
         if msg.stop_reason == "refusal":
             return Answer(REFUSAL_ANSWER, model=msg.model, refused=True, **tokens)
 
