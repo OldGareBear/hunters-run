@@ -382,6 +382,16 @@ class Settings(BaseSettings):
             problems.append("ANTHROPIC_API_KEY is required when LLM_PROVIDER=anthropic")
         if self.email_provider == "console":
             problems.append("EMAIL_PROVIDER must be a real provider (smtp, ses or postmark)")
+        if self.email_provider == "smtp" and not self.smtp_host:
+            problems.append("SMTP_HOST is required when EMAIL_PROVIDER=smtp")
+        if self.email_provider == "smtp" and self.smtp_host.lower().endswith(
+            ("gmail.com", "googlemail.com")
+        ):
+            if not (self.smtp_username and self.smtp_password):
+                problems.append(
+                    "SMTP_USERNAME and SMTP_PASSWORD (a Gmail app password) are required "
+                    "to send through Gmail"
+                )
         if self.retrieval == "vector" and self.embedding_provider == "hashing":
             problems.append(
                 "EMBEDDING_PROVIDER=hashing is for development; set RETRIEVAL=keyword "

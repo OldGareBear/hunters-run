@@ -1,6 +1,8 @@
 # The portal on AWS Lambda behind an API Gateway HTTP API. No VPC: the functions
 # reach Neon, Dropbox and the Anthropic API over the internet, so there's no NAT
-# gateway to pay for. Applied by .github/workflows/deploy.yml.
+# gateway to pay for. That includes email: by default it goes out through the HOA's
+# Gmail account over SMTP (smtp.gmail.com:587, STARTTLS), so no domain is needed.
+# Applied by .github/workflows/deploy.yml.
 
 data "aws_caller_identity" "me" {}
 data "aws_region" "current" {}
@@ -23,6 +25,9 @@ locals {
   image          = "${data.aws_ecr_repository.app.repository_url}:${var.image_tag}"
   tasks_function = "${var.name}-tasks"
   base_url       = var.custom_domain != "" ? "https://${var.custom_domain}" : aws_apigatewayv2_api.http.api_endpoint
+  # The deploy workflow passes an unset GitHub variable as "", which means the default.
+  email_provider = var.email_provider != "" ? var.email_provider : "smtp"
+  smtp           = local.email_provider == "smtp"
 
   # Non-secret settings. The secrets (database URL, API keys, Dropbox) come from the
   # Secrets Manager secret at start-up; see DEPLOY.md for its contents.
@@ -46,8 +51,11 @@ locals {
     CHAT_PRICE_OUTPUT_PER_MTOK    = var.chat_price_output_per_mtok
     CHAT_DAILY_LIMIT_PER_USER     = tostring(var.chat_daily_limit_per_user)
     CHAT_MONTHLY_BUDGET_USD       = tostring(var.chat_monthly_budget_usd)
-    EMAIL_PROVIDER                = "ses"
-    SES_REGION                    = local.region
+    EMAIL_PROVIDER                = local.email_provider
+    SES_REGION                    = local.smtp ? "" : local.region
+    SMTP_HOST                     = local.smtp ? var.smtp_host : ""
+    SMTP_PORT                     = local.smtp ? tostring(var.smtp_port) : ""
+    SMTP_STARTTLS                 = local.smtp ? "true" : ""
     EMAIL_FROM                    = var.email_from
     EMAIL_SEND_INLINE             = "true"
     MANAGEMENT_NOTIFY_EMAILS      = var.management_notify_emails
@@ -76,7 +84,7 @@ resource "aws_iam_role_policy" "lambda" {
   role = aws_iam_role.lambda.id
   policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
+    Statement = concat([
       {
         Effect   = "Allow"
         Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
@@ -88,19 +96,21 @@ resource "aws_iam_role_policy" "lambda" {
         Resource = data.aws_secretsmanager_secret.app.arn
       },
       {
-        # Every identity in this account and region, not just the sending domain: in the
-        # SES sandbox, SES also checks the (verified) recipient's identity against this.
-        Effect   = "Allow"
-        Action   = ["ses:SendEmail", "ses:SendRawEmail"]
-        Resource = "arn:aws:ses:${local.region}:${local.account}:identity/*"
-      },
-      {
         # The web function hands email and Dropbox syncs to the tasks function.
         Effect   = "Allow"
         Action   = "lambda:InvokeFunction"
         Resource = aws_lambda_function.tasks.arn
       },
-    ]
+      ], local.smtp ? [] : [
+      {
+        # Only when sending through SES. Every identity in this account and region, not
+        # just the sending domain: in the SES sandbox, SES also checks the (verified)
+        # recipient's identity against this.
+        Effect   = "Allow"
+        Action   = ["ses:SendEmail", "ses:SendRawEmail"]
+        Resource = "arn:aws:ses:${local.region}:${local.account}:identity/*"
+      },
+    ])
   })
 }
 

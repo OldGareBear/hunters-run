@@ -21,13 +21,36 @@ variable "hoa_name" {
 }
 
 variable "email_from" {
-  description = "Sender, e.g. \"Your HOA <no-reply@your-domain.org>\". Must be on email_domain."
+  description = "Sender, e.g. \"Your HOA <yourhoa@gmail.com>\". With Gmail it must be the account's own address; with SES, an address on email_domain."
   type        = string
 }
 
-variable "email_domain" {
-  description = "The domain verified in SES by infra/bootstrap."
+variable "email_provider" {
+  description = "smtp (the HOA's Gmail account, the default; no domain needed) or ses (needs email_domain verified by infra/bootstrap). Empty means smtp."
   type        = string
+  default     = "smtp"
+  validation {
+    condition     = contains(["", "smtp", "ses"], var.email_provider)
+    error_message = "email_provider must be smtp or ses."
+  }
+}
+
+variable "email_domain" {
+  description = "Only for email_provider = ses: the domain verified in SES by infra/bootstrap."
+  type        = string
+  default     = ""
+}
+
+variable "smtp_host" {
+  description = "For email_provider = smtp. The login and app password are in the secret (DEPLOY.md, step 4)."
+  type        = string
+  default     = "smtp.gmail.com"
+}
+
+variable "smtp_port" {
+  description = "For email_provider = smtp: 587 with STARTTLS."
+  type        = number
+  default     = 587
 }
 
 variable "management_notify_emails" {

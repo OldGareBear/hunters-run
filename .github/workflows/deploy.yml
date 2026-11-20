@@ -30,6 +30,7 @@ jobs:
       TF_VAR_image_tag: ${{ github.sha }}
       TF_VAR_hoa_name: ${{ vars.HOA_NAME }}
       TF_VAR_email_from: ${{ vars.EMAIL_FROM }}
+      TF_VAR_email_provider: ${{ vars.EMAIL_PROVIDER }}
       TF_VAR_email_domain: ${{ vars.EMAIL_DOMAIN }}
       TF_VAR_management_notify_emails: ${{ vars.MANAGEMENT_NOTIFY_EMAILS }}
       TF_VAR_custom_domain: ${{ vars.CUSTOM_DOMAIN }}
