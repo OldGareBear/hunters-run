@@ -252,6 +252,10 @@ class Settings(BaseSettings):
     # How many messages one person can send to management in any 24 hours.
     escalations_per_day: int = Field(default=5, ge=1)
 
+    # --- Duty calendar --------------------------------------------------------
+    # Reminder emails for recurring duties go out from this hour (local time) on.
+    duty_reminder_hour: int = Field(default=7, ge=0, le=23)
+
     # --- Reservations -------------------------------------------------------
     # Local time zone for opening hours and calendars (an IANA name).
     hoa_timezone: str = "America/New_York"

@@ -2,19 +2,21 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from typing import Any
 
 from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     JSON,
     Boolean,
+    Date,
     DateTime,
     ForeignKey,
     Index,
     Integer,
     String,
     Text,
+    UniqueConstraint,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -365,6 +367,40 @@ class Reservation(Base):
         return as_utc(self.ends_at)
 
 
+class Duty(Base):
+    """A recurring board or management duty; its owners get reminder emails."""
+
+    __tablename__ = "duties"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    title: Mapped[str] = mapped_column(String(200))
+    details: Mapped[str] = mapped_column(Text, default="")
+    # Email addresses and/or role names ("board", "management", "admin").
+    owners: Mapped[list[str]] = mapped_column(JSON, default=list)
+    first_due: Mapped[date] = mapped_column(Date)
+    repeat: Mapped[str] = mapped_column(String(20), default="none")
+    remind_days: Mapped[list[int]] = mapped_column(
+        JSON, default=list
+    )  # days before; 0 = on the day
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
+    created_at: Mapped[datetime] = _ts(default=utcnow)
+    updated_at: Mapped[datetime] = _ts(default=utcnow, onupdate=utcnow)
+
+
+class DutyReminder(Base):
+    """One reminder sent for one occurrence of a duty. The unique key is what stops a
+    reminder going out twice, even if two workers run at once."""
+
+    __tablename__ = "duty_reminders"
+    __table_args__ = (UniqueConstraint("duty_id", "due_on", "lead_days"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    duty_id: Mapped[int] = mapped_column(ForeignKey("duties.id", ondelete="CASCADE"), index=True)
+    due_on: Mapped[date] = mapped_column(Date)
+    lead_days: Mapped[int] = mapped_column(Integer)
+    sent_at: Mapped[datetime] = _ts(default=utcnow)
+
+
 class AuditLog(Base):
     __tablename__ = "audit_log"
 
@@ -385,6 +421,8 @@ __all__ = [
     "ChatMessage",
     "Conversation",
     "Document",
+    "Duty",
+    "DutyReminder",
     "DocumentAccess",
     "DocumentChunk",
     "EmailBlast",

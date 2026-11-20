@@ -16,6 +16,7 @@
     <a href="/documents">Documents</a>
     {% if has_perm(user, Perm.RESERVATIONS_BOOK) or has_perm(user, Perm.RESERVATIONS_MANAGE) %}<a href="/reservations">Book</a>{% endif %}
     {% if has_perm(user, Perm.ASK_MANAGEMENT) %}<a href="/ask-management">Ask management</a>{% endif %}
+    {% if has_perm(user, Perm.DUTIES_MANAGE) %}<a href="/duties">Duties</a>{% endif %}
     {% if has_perm(user, Perm.BLASTS_SEND) %}<a href="/blasts">Announcements</a>{% endif %}
     {% if has_perm(user, Perm.USERS_VIEW) %}<a href="/admin/users">People</a>{% endif %}
     {% if has_perm(user, Perm.AUDIT_VIEW) %}<a href="/admin/audit">Audit log</a>{% endif %}

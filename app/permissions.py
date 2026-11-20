@@ -52,6 +52,7 @@ class Perm(StrEnum):
     BLASTS_SEND = "blasts.send"
     ASK_MANAGEMENT = "management.ask"  # email a question to the management company
     AUDIT_VIEW = "audit.view"
+    DUTIES_MANAGE = "duties.manage"  # the calendar of recurring duties and its reminders
     RESERVATIONS_BOOK = "reservations.book"
     # Approve and decline requests, cancel anyone's booking, block time, see who booked.
     RESERVATIONS_MANAGE = "reservations.manage"
@@ -69,6 +70,7 @@ POLICY: dict[Role, frozenset[Perm]] = {
             Perm.BLASTS_SEND,
             Perm.AUDIT_VIEW,
             Perm.ASK_MANAGEMENT,  # board members are homeowners too
+            Perm.DUTIES_MANAGE,
             Perm.RESERVATIONS_BOOK,
         }
     ),
@@ -80,6 +82,7 @@ POLICY: dict[Role, frozenset[Perm]] = {
             Perm.USERS_VIEW,
             Perm.USERS_INVITE_HOMEOWNER,
             Perm.RESERVATIONS_MANAGE,
+            Perm.DUTIES_MANAGE,
         }
     ),
     Role.HOMEOWNER: frozenset({Perm.CHAT, Perm.ASK_MANAGEMENT, Perm.RESERVATIONS_BOOK}),
