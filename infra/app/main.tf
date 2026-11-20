@@ -29,6 +29,7 @@ locals {
   env = {
     APP_ENV                       = "production"
     AWS_SECRETS_MANAGER_SECRET_ID = data.aws_secretsmanager_secret.app.name
+    SECRET_VERSION                = var.secret_version # not read by the app; see variables.tf
     HOA_NAME                      = var.hoa_name
     BASE_URL                      = local.base_url
     SESSION_COOKIE_SECURE         = "true"

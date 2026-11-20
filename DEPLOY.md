@@ -112,7 +112,7 @@ aws secretsmanager put-secret-value --region us-east-1 \
 rm ~/hoa-secret.json
 ```
 
-To change a value later, run the same command with the whole JSON again, then re-run the deploy workflow (or wait for the next merge) so the functions restart and read it.
+To change a value later, run the same command with the whole JSON again, then run the **Deploy** workflow from the Actions tab (or wait for the next merge). The deploy passes the secret's current version to the functions, so a new value restarts them and they read it; re-running for a commit that's already deployed reuses its image.
 
 ### 5. Tell GitHub where to deploy
 
@@ -138,7 +138,7 @@ Deploys are skipped until `AWS_DEPLOY_ROLE_ARN` is set, so nothing happens befor
 
 ### 7. Deploy
 
-Merge the pull request into `main`, or if it's already merged, run the **Deploy** workflow from the Actions tab. It runs the tests, builds the image, applies `infra/app`, runs the database migrations and checks that the site answers. The workflow summary shows the portal's address, which looks like `https://abc123.execute-api.us-east-1.amazonaws.com`.
+Merge the pull request into `main`, or if it's already merged, run the **Deploy** workflow from the Actions tab. It runs the tests, builds the image, updates the tasks function, runs the database migrations with it, applies the rest of `infra/app` and checks that the site answers. If the first run fails (say the secret wasn't filled in yet), fix the cause and use **Re-run jobs**: the image built the first time is reused. The workflow summary shows the portal's address, which looks like `https://abc123.execute-api.us-east-1.amazonaws.com`.
 
 ### 8. Create the first administrator
 
@@ -165,9 +165,12 @@ To serve the portal at, say, `portal.yourhoa.org`:
 
 ## Day to day
 
-- **Deploys** happen on every merge to `main`. A failed check stops the deploy before anything changes.
+- **Deploys** happen on every merge to `main`. A failed test stops the deploy before anything changes. After the image is built, the tasks function moves to the new code and runs the migrations; only then does the web function move. So a failed migration leaves the site on the previous code (the tasks function stays on the new code until the next deploy) and the workflow fails; fix it and merge again.
+- **Migrations must work with the previous release**, because the web function runs the old code against the new schema for the minute between the migration and its own update. Add columns as nullable or with a default, and drop or rename one only in a later release, once no deployed code uses it.
 - **Logs** are in CloudWatch under `/aws/lambda/hoa-portal-web` and `/aws/lambda/hoa-portal-tasks`.
 - **Background work.** Email goes out right after the action that caused it. Every hour the tasks function retries any email that failed and checks Dropbox. So a file moved in Dropbox shows its new place (and the chatbot its new text) within the hour, or straight away after **Check Dropbox now**. Change the schedule with `worker_schedule` in `infra/app/variables.tf`.
 - **Large downloads.** Lambda can return at most 6 MB, so files over 4 MB are handed to Dropbox as a temporary download link (valid for four hours) after the portal checks the person may see them, in the folder the file is in now.
 - **Rolling back.** Revert the change on `main`; the merge deploys the previous version.
+- **If creating a function fails on the image** ("Lambda does not have permission to access the ECR image") on the first deploy, Lambda wanted to add its own statement to the repository policy. Give the deploy role `ecr:SetRepositoryPolicy` on that one repository (add it to the `EcrPush` statement in `infra/bootstrap/main.tf` and apply bootstrap again), then re-run the deploy.
+- **Use a dedicated AWS account if you can.** The deploy role is limited to this app's functions, roles, logs, schedule and secret, but its API Gateway permissions cover every HTTP API and custom domain in the region. In an account shared with other projects, it could change theirs.
 - **Removing everything.** `terraform destroy` in `infra/app` (with the same `-backend-config` as the workflow), then in `infra/bootstrap`. Delete the Neon project and the Anthropic key separately.

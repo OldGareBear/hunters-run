@@ -49,34 +49,59 @@ jobs:
         env:
           IMAGE: ${{ steps.ecr.outputs.registry }}/hoa-portal:${{ github.sha }}
         run: |
+          # Tags are immutable and builds aren't byte-for-byte reproducible, so a re-run
+          # for the same commit reuses the image it pushed the first time.
+          if aws ecr describe-images --repository-name hoa-portal \
+              --image-ids imageTag="$GITHUB_SHA" > /dev/null 2>&1; then
+            echo "The image for $GITHUB_SHA is already in ECR."
+            exit 0
+          fi
           # --provenance=false: Lambda only accepts single-platform image manifests.
           docker build -f Dockerfile.lambda --platform linux/amd64 --provenance=false -t "$IMAGE" .
           docker push "$IMAGE"
+
+      - name: Find the secret's current version
+        run: |
+          # Passed to the functions as SECRET_VERSION, so a new secret value (DEPLOY.md,
+          # step 4) changes their configuration and Lambda starts fresh instances that
+          # read it. Reads only the secret's metadata, never its value.
+          version=$(aws secretsmanager describe-secret --secret-id hoa-portal/production \
+            | jq -r '(.VersionIdsToStages // {}) | to_entries[]
+                     | select(.value | index("AWSCURRENT")) | .key')
+          echo "TF_VAR_secret_version=$version" >> "$GITHUB_ENV"
 
       - uses: hashicorp/setup-terraform@v3
         with:
           terraform_version: "~1.13.0"
           terraform_wrapper: false
 
-      - name: Apply infrastructure
+      - name: Update the tasks function
         working-directory: infra/app
         run: |
           terraform init -input=false \
             -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
             -backend-config="region=$AWS_REGION"
-          terraform apply -input=false -auto-approve
+          # Only the function that runs migrations (and the policy that lets it read the
+          # secret), so the web function keeps the previous code until they've run.
+          terraform apply -input=false -auto-approve \
+            -target=aws_lambda_function.tasks -target=aws_iam_role_policy.lambda
 
       - name: Migrate the database
-        working-directory: infra/app
+        env:
+          AWS_MAX_ATTEMPTS: "1" # a timed-out invoke must not start a second migration
         run: |
-          fn=$(terraform output -raw tasks_function)
-          aws lambda invoke --function-name "$fn" --cli-binary-format raw-in-base64-out \
+          aws lambda invoke --function-name hoa-portal-tasks --cli-binary-format raw-in-base64-out \
+            --cli-read-timeout 900 --cli-connect-timeout 30 \
             --payload '{"task": "migrate"}' --log-type Tail result.json > invoke.json
           cat result.json; echo
           if jq -e '.FunctionError' invoke.json > /dev/null; then
             jq -r '.LogResult' invoke.json | base64 -d
             exit 1
           fi
+
+      - name: Apply infrastructure
+        working-directory: infra/app
+        run: terraform apply -input=false -auto-approve
 
       - name: Check the site answers
         working-directory: infra/app

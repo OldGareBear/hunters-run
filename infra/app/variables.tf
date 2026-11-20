@@ -4,6 +4,12 @@ variable "name" {
   default     = "hoa-portal"
 }
 
+variable "secret_version" {
+  description = "The secret's current version id (set by the deploy workflow). A new value restarts the functions so they read the new secret."
+  type        = string
+  default     = ""
+}
+
 variable "image_tag" {
   description = "Container image tag to run (the deploy workflow passes the git commit)."
   type        = string

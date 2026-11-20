@@ -344,3 +344,52 @@ def test_migrations_accept_a_url_encoded_password(monkeypatch, capsys):
     cfg.set_main_option("script_location", str(root / "migrations"))
     command.upgrade(cfg, "head", sql=True)  # offline: prints the SQL, connects to nothing
     assert "CREATE TABLE users" in capsys.readouterr().out
+
+
+# --- the deploy workflow ---------------------------------------------------------
+def _deploy_steps() -> list[dict]:
+    from pathlib import Path
+
+    import yaml  # comes with uvicorn[standard]
+
+    wf = yaml.safe_load((Path(__file__).parents[1] / ".github/workflows/deploy.yml").read_text())
+    return wf["jobs"]["deploy"]["steps"]
+
+
+def test_deploy_can_be_rerun_for_the_same_commit():
+    build = next(s for s in _deploy_steps() if s.get("name") == "Build and push the image")
+    script = build["run"]
+    assert script.index("aws ecr describe-images") < script.index("docker build")
+
+
+def test_a_new_secret_value_restarts_the_functions():
+    from pathlib import Path
+
+    steps = _deploy_steps()
+    names = [s.get("name") for s in steps]
+    find = steps[names.index("Find the secret's current version")]
+    assert "describe-secret" in find["run"] and "TF_VAR_secret_version" in find["run"]
+    assert "get-secret-value" not in find["run"]  # metadata only
+    assert names.index("Find the secret's current version") < names.index(
+        "Update the tasks function"
+    )
+    tf = (Path(__file__).parents[1] / "infra/app/main.tf").read_text()
+    assert "SECRET_VERSION                = var.secret_version" in tf
+
+
+def test_migrations_run_before_the_web_function_changes():
+    steps = _deploy_steps()
+    names = [s.get("name") for s in steps]
+    tasks, migrate, full = (
+        names.index("Update the tasks function"),
+        names.index("Migrate the database"),
+        names.index("Apply infrastructure"),
+    )
+    assert tasks < migrate < full
+    targeted = steps[tasks]["run"]
+    assert "-target=aws_lambda_function.tasks" in targeted
+    assert "-target=aws_iam_role_policy.lambda" in targeted  # lets it read the secret
+    assert "-target" not in steps[full]["run"]
+    invoke = steps[migrate]
+    assert invoke["env"]["AWS_MAX_ATTEMPTS"] == "1"  # no second, overlapping migration
+    assert "--cli-read-timeout 900" in invoke["run"]
