@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Inbox{% endblock %}
+{% block content %}
+<h1>Inbox</h1>
+{% if settings().inbox_enabled %}
+<p>Add <strong>{{ settings().inbox_address }}</strong> as a recipient (To or Cc) on any email chain the weekly review should know about. The portal reads it {% if settings().inbox_fetch_hours %}every {{ settings().inbox_fetch_hours }} hours and {% endif %}just before each weekly review.</p>
+<p class="muted small">Only emails sent by board, admin or management members are kept, and only if the sender checks out. Vendors' replies aren't kept, but a member's reply that quotes them is. Attachments are left out. Management sees only chains management was on. Emails are deleted {{ settings().inbox_retention_days }} days after they're read in.</p>
+{% if state and state.last_finished_at %}<p class="muted small">Last read {{ state.last_finished_at.strftime("%b") }} {{ state.last_finished_at.day }} at {{ state.last_finished_at.strftime("%H:%M") }} UTC{% if state.last_error %}: it failed ({{ state.last_error }}){% endif %}.</p>{% endif %}
+{% else %}
+<p class="muted">The inbox isn't set up yet. DEPLOY.md says how.</p>
+{% endif %}
+
+<table>
+  <thead><tr><th>Subject</th><th>From</th><th>Sent</th><th>Seen by</th></tr></thead>
+  <tbody>
+  {% for e in emails %}
+    {% set when = e.sent_at or e.received_at %}
+    <tr>
+      <td><a href="/inbox/{{ e.id }}">{{ e.subject or "(no subject)" }}</a></td>
+      <td>{{ e.from_name or e.from_email }}</td>
+      <td>{{ when.strftime("%b") }} {{ when.day }}</td>
+      <td>{{ "Board and management" if e.audience == "all" else "Board" }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="4" class="muted">No emails kept yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

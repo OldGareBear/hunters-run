@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}{{ email.subject or "Email" }}{% endblock %}
+{% block content %}
+<p><a href="/inbox">Inbox</a></p>
+<h1>{{ email.subject or "(no subject)" }}</h1>
+{% set when = email.sent_at or email.received_at %}
+<p class="muted">From {{ email.from_name }} ({{ email.from_email }}), {{ when.strftime("%b") }} {{ when.day }}, {{ when.year }}. Seen by {{ "board and management" if email.audience == "all" else "the board" }}.</p>
+<pre class="email-body">{{ email.body }}</pre>
+{% endblock %}
