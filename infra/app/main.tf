@@ -59,6 +59,7 @@ locals {
     EMAIL_FROM                    = var.email_from
     EMAIL_SEND_INLINE             = "true"
     MANAGEMENT_NOTIFY_EMAILS      = var.management_notify_emails
+    INBOX_ADDRESS                 = var.inbox_address
     PYTHONDONTWRITEBYTECODE       = "1"
   }
   # An optional setting left empty is left out, the same to the app as unset.

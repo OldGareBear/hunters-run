@@ -56,6 +56,9 @@ class Perm(StrEnum):
     # See what the weekly review would send and what it sent (admins only: it shows
     # board-only and management-only material side by side).
     WEEKLY_REVIEW = "weekly_review.view"
+    # Read the emails kept from the inbox people cc (management sees only chains
+    # management was on).
+    INBOX_VIEW = "inbox.view"
     RESERVATIONS_BOOK = "reservations.book"
     # Approve and decline requests, cancel anyone's booking, block time, see who booked.
     RESERVATIONS_MANAGE = "reservations.manage"
@@ -74,6 +77,7 @@ POLICY: dict[Role, frozenset[Perm]] = {
             Perm.AUDIT_VIEW,
             Perm.ASK_MANAGEMENT,  # board members are homeowners too
             Perm.DUTIES_MANAGE,
+            Perm.INBOX_VIEW,
             Perm.RESERVATIONS_BOOK,
         }
     ),
@@ -86,6 +90,7 @@ POLICY: dict[Role, frozenset[Perm]] = {
             Perm.USERS_INVITE_HOMEOWNER,
             Perm.RESERVATIONS_MANAGE,
             Perm.DUTIES_MANAGE,
+            Perm.INBOX_VIEW,
         }
     ),
     Role.HOMEOWNER: frozenset({Perm.CHAT, Perm.ASK_MANAGEMENT, Perm.RESERVATIONS_BOOK}),

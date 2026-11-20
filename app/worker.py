@@ -1,5 +1,5 @@
-"""Background worker: runs the weekly review, delivers the email outbox, syncs the Dropbox
-folder and prunes expired rows.
+"""Background worker: reads the inbox people cc, runs the weekly review, delivers the email
+outbox, syncs the Dropbox folder and prunes expired rows.
 
 Run: python -m app.worker            (loops forever)
      python -m app.worker --once     (one pass, e.g. from cron)
@@ -42,6 +42,9 @@ def prune(db) -> None:
             EmailMessage.sent_at < now - timedelta(days=30),
         )
     )
+    from app.services import inbound_email
+
+    inbound_email.prune(db)
     db.commit()
 
 
@@ -66,6 +69,19 @@ def maybe_run_weekly_review(db, now: float, *, force: bool = False) -> None:
         return
     if queued:
         log.info("weekly review: queued %d emails", queued)
+
+
+def maybe_read_inbox(db) -> None:
+    """Read the inbox people cc every INBOX_FETCH_HOURS (the last read is kept in the
+    database, so this holds across restarts and several workers)."""
+    from app.services import inbound_email
+
+    try:
+        if inbound_email.due(db):
+            inbound_email.fetch(db)
+    except Exception:  # a bad read mustn't stop email delivery
+        db.rollback()
+        log.exception("reading the inbox failed")
 
 
 def maybe_sync(db, now: float, *, force: bool = False) -> None:
@@ -93,6 +109,7 @@ def run_once(*, force_sync: bool = False) -> int:
     """One pass. force_sync syncs Dropbox now, e.g. from a schedule that runs hourly."""
     db = session_factory()()
     try:
+        maybe_read_inbox(db)
         maybe_run_weekly_review(db, time.monotonic(), force=force_sync)
         sent = deliver_pending(db)
         maybe_sync(db, time.monotonic(), force=force_sync)

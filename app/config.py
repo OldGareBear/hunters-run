@@ -272,6 +272,29 @@ class Settings(BaseSettings):
     weekly_review_max_chars: int = Field(default=60_000, ge=5_000, le=400_000)
     weekly_review_max_tokens: int = Field(default=4000, ge=500, le=32_000)
 
+    # --- Inbox to cc ------------------------------------------------------------
+    # A dedicated Gmail address board and management members cc on email chains. The
+    # portal reads it over IMAP with an app password (read-only: it never sends from it,
+    # flags, moves or deletes anything there) and feeds what it reads to the weekly
+    # review. Leave INBOX_ADDRESS empty to turn this off. It can be the same Gmail account
+    # the portal sends from: with INBOX_ADDRESS equal to SMTP_USERNAME, INBOX_APP_PASSWORD
+    # may be left empty and SMTP_PASSWORD is used.
+    inbox_address: str = ""
+    inbox_app_password: str = _secret()
+    inbox_imap_host: str = "imap.gmail.com"
+    inbox_imap_port: int = 993
+    # The server whose Authentication-Results header is trusted: the inbox's own mail
+    # server, which writes the topmost one. Any other is the sender's and is ignored.
+    inbox_authserv_id: str = "mx.google.com"
+    # Read the inbox this often, and always just before the weekly review. 0 = only then.
+    inbox_fetch_hours: int = Field(default=24, ge=0, le=168)
+    # Messages that arrived this many days back are looked at on each read.
+    inbox_lookback_days: int = Field(default=10, ge=1, le=60)
+    # Kept emails are deleted from the portal this many days after they were read in.
+    inbox_retention_days: int = Field(default=90, ge=1, le=365)
+    inbox_max_message_mb: int = Field(default=10, ge=1, le=50)
+    inbox_max_body_chars: int = Field(default=20_000, ge=1_000, le=200_000)
+
     # --- Reservations -------------------------------------------------------
     # Local time zone for opening hours and calendars (an IANA name).
     hoa_timezone: str = "America/New_York"
@@ -296,6 +319,17 @@ class Settings(BaseSettings):
     @property
     def management_notify_list(self) -> list[str]:
         return [e.strip() for e in self.management_notify_emails.split(",") if e.strip()]
+
+    @property
+    def inbox_enabled(self) -> bool:
+        return bool(self.inbox_address.strip())
+
+    @property
+    def inbox_password(self) -> str:
+        if self.inbox_app_password:
+            return self.inbox_app_password
+        same = self.inbox_address.strip().lower() == self.smtp_username.strip().lower()
+        return self.smtp_password if same else ""
 
     @property
     def model_info(self) -> ModelInfo | None:
@@ -396,6 +430,11 @@ class Settings(BaseSettings):
             problems.append(
                 "EMBEDDING_PROVIDER=hashing is for development; set RETRIEVAL=keyword "
                 "or EMBEDDING_PROVIDER=voyage"
+            )
+        if self.inbox_enabled and not self.inbox_password:
+            problems.append(
+                "INBOX_APP_PASSWORD is required when INBOX_ADDRESS is set (or make "
+                "INBOX_ADDRESS the SMTP_USERNAME account, whose password is then used)"
             )
         if self.embedding_provider == "voyage" and not self.voyage_api_key:
             problems.append("VOYAGE_API_KEY is required when EMBEDDING_PROVIDER=voyage")

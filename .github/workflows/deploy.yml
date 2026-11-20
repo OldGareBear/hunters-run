@@ -33,6 +33,7 @@ jobs:
       TF_VAR_email_provider: ${{ vars.EMAIL_PROVIDER }}
       TF_VAR_email_domain: ${{ vars.EMAIL_DOMAIN }}
       TF_VAR_management_notify_emails: ${{ vars.MANAGEMENT_NOTIFY_EMAILS }}
+      TF_VAR_inbox_address: ${{ vars.INBOX_ADDRESS }}
       TF_VAR_custom_domain: ${{ vars.CUSTOM_DOMAIN }}
       TF_VAR_custom_domain_certificate_arn: ${{ vars.CUSTOM_DOMAIN_CERTIFICATE_ARN }}
     steps:

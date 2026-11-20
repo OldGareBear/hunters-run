@@ -304,6 +304,7 @@ def test_lambda_environment_passes_production_checks(monkeypatch):
         ANTHROPIC_API_KEY="sk-placeholder",
         SMTP_USERNAME="yourhoa@gmail.com",
         SMTP_PASSWORD="app-password",
+        INBOX_ADDRESS="yourhoa@gmail.com",  # the same account reads the inbox people cc
     )
     assert env["RETRIEVAL"] == "keyword" and env["APP_ENV"] == "production"
     for k, v in env.items():
