@@ -37,10 +37,31 @@ def _web(event: dict, context: Any) -> dict:
 def _migrate() -> str:
     from alembic import command
     from alembic.config import Config
+    from alembic.runtime.migration import MigrationContext
+    from alembic.script import ScriptDirectory
+    from sqlalchemy import create_engine, pool
+
+    from app.config import get_settings
 
     root = Path(__file__).resolve().parent.parent
     cfg = Config(str(root / "alembic.ini"))
     cfg.set_main_option("script_location", str(root / "migrations"))
+
+    # After a rollback, the database can be at a revision this (older) code doesn't have.
+    # Migrations must work with the previous release (DEPLOY.md), so leave the schema be;
+    # upgrading would fail and stop the deploy of the rollback.
+    known = {r.revision for r in ScriptDirectory.from_config(cfg).walk_revisions()}
+    engine = create_engine(get_settings().database_url, poolclass=pool.NullPool)
+    try:
+        with engine.connect() as conn:
+            current = MigrationContext.configure(conn).get_current_heads()
+    finally:
+        engine.dispose()
+    newer = sorted(r for r in current if r not in known)
+    if newer:
+        msg = f"database is at {', '.join(newer)}, newer than this code; schema left as it is"
+        log.warning(msg)
+        return msg
     command.upgrade(cfg, "head")
     return "migrated"
 

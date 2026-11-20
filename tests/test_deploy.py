@@ -346,6 +346,33 @@ def test_migrations_accept_a_url_encoded_password(monkeypatch, capsys):
     assert "CREATE TABLE users" in capsys.readouterr().out
 
 
+def test_migrate_leaves_a_newer_database_alone(monkeypatch, tmp_path, caplog):
+    """Rolling back a change that added a migration: the database is ahead of the code."""
+    from alembic import command
+    from sqlalchemy import create_engine, inspect, text
+
+    from app import lambda_handler
+
+    url = f"sqlite:///{tmp_path / 'rollback.db'}"
+    monkeypatch.setattr(get_settings(), "database_url", url)
+    engine = create_engine(url)
+    with engine.begin() as conn:
+        conn.execute(text("CREATE TABLE alembic_version (version_num VARCHAR(32) PRIMARY KEY)"))
+        conn.execute(text("INSERT INTO alembic_version VALUES ('0099_from_a_reverted_change')"))
+    with caplog.at_level("WARNING", logger="app.lambda"):
+        result = lambda_handler._migrate()
+    assert "0099_from_a_reverted_change" in result and "newer than this code" in result
+    assert "newer than this code" in caplog.text
+    assert inspect(engine).get_table_names() == ["alembic_version"]  # nothing touched
+
+    # A database this code knows (here, an empty one) is migrated as before.
+    calls = []
+    monkeypatch.setattr(command, "upgrade", lambda cfg, rev: calls.append(rev))
+    monkeypatch.setattr(get_settings(), "database_url", f"sqlite:///{tmp_path / 'new.db'}")
+    assert lambda_handler._migrate() == "migrated" and calls == ["head"]
+    engine.dispose()
+
+
 # --- the deploy workflow ---------------------------------------------------------
 def _deploy_steps() -> list[dict]:
     from pathlib import Path
