@@ -11,14 +11,18 @@ This sets the portal up on AWS for a few dozen people at close to no cost. Once 
 | Database | [Neon](https://neon.com) Postgres, free plan | $0 |
 | Documents | The board's Dropbox folder (read-only) | $0 |
 | Secrets | One AWS Secrets Manager secret | $0.40 a month |
-| Email | Amazon SES | $0.10 per 1,000 emails |
+| Email | The HOA's free Gmail account, over SMTP | $0 (Gmail allows about 500 recipients a day) |
 | Container images | ECR (keeps the last 5) | a few cents |
 | Logs | CloudWatch, kept 30 days | about $0 |
 | Chatbot | Anthropic API, prepaid credits | capped by the portal's monthly budget (default $5) |
 
-**Total: about $0.50 a month for AWS, plus whatever the chatbot uses, which can't pass the budget you set.** API Gateway is free for the first 12 months and about a cent a month after that at this size. If the HOA doesn't already own a domain for sending email, one costs about $12–15 a year.
+**Total: about $0.50 a month for AWS, plus whatever the chatbot uses, which can't pass the budget you set.** API Gateway is free for the first 12 months and about a cent a month after that at this size. No domain is needed.
 
-There's no VPC and no NAT gateway (a NAT gateway alone would be about $32 a month). The functions reach Neon, Dropbox and Anthropic over the internet with TLS.
+There's no VPC and no NAT gateway (a NAT gateway alone would be about $32 a month). The functions reach Neon, Dropbox, Anthropic and Gmail (`smtp.gmail.com`, port 587) over the internet with TLS.
+
+### Email without a domain
+
+The portal sends its email (invitations, password resets, questions to management, announcements) from a free Gmail account the HOA creates for it, such as `yourhoa@gmail.com`, using an app password. People see that address as the sender, and replies go to it. Gmail lets an account send to about 500 recipients a day. That's plenty here: an announcement to every household is one email per recipient, so even 150 homes leaves room for the day's other email. Anything Gmail refuses is retried hourly, up to five times. If the HOA ever gets its own domain, it can switch to Amazon SES ([step 6](#6-optional-send-through-amazon-ses-with-your-own-domain)).
 
 ### Why Neon and not Supabase
 
@@ -46,7 +50,7 @@ Each answer uses Claude Haiku 5.5 (`claude-haiku-5-5`, $0.10 per million input t
 - An AWS account you can sign in to as an administrator, with the [AWS CLI](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) set up (`aws sts get-caller-identity` should work).
 - [Terraform](https://developer.hashicorp.com/terraform/install) 1.10 or newer.
 - The [GitHub CLI](https://cli.github.com) signed in with access to this repository (or you can set the variables on github.com).
-- The HOA's domain, with access to its DNS records (for sending email).
+- A free Gmail account for the HOA (step 4 says how to set it up). No domain is needed.
 - Python 3.12 and this repository cloned, for the one-time commands in steps 4 and 8.
 - The Dropbox folder and Dropbox app from the README's **Documents (Dropbox)** section, and the refresh token from `python -m app.cli dropbox-auth`.
 
@@ -56,15 +60,15 @@ Pick one AWS region and use it everywhere. The examples use `us-east-1`.
 
 ### 1. Set up AWS (once)
 
-This creates the pieces the automatic deploys need: a bucket for Terraform's state, the container registry, the empty secret, the email domain in SES, and a role that GitHub Actions can use without any stored AWS keys. The role can only be used by workflows running on this repository's `main` branch.
+This creates the pieces the automatic deploys need: a bucket for Terraform's state, the container registry, the empty secret, and a role that GitHub Actions can use without any stored AWS keys. The role can only be used by workflows running on this repository's `main` branch.
 
 ```
 cd infra/bootstrap
 terraform init
-terraform apply -var github_repo=OWNER/REPO -var email_domain=yourhoa.org -var region=us-east-1
+terraform apply -var github_repo=OWNER/REPO -var region=us-east-1
 ```
 
-If your AWS account already has GitHub's OIDC provider (from another project), add `-var create_github_oidc_provider=false`.
+Leave out `email_domain`: it's only for sending through SES with your own domain (step 6). If your AWS account already has GitHub's OIDC provider (from another project), add `-var create_github_oidc_provider=false`.
 
 Keep the `terraform.tfstate` file this creates somewhere safe (it isn't secret, but you'll need it to change or remove these pieces later). It's ignored by git.
 
@@ -85,7 +89,13 @@ Keep the `terraform.tfstate` file this creates somewhere safe (it isn't secret, 
 
 ### 4. Fill in the secret
 
-Make a random session key:
+First, the Gmail account the portal sends from:
+
+1. Create a new Gmail account for the HOA at [accounts.google.com](https://accounts.google.com/signup), for example `yourhoa@gmail.com`. Use it only for the portal, and give a board member the recovery phone.
+2. Turn on **2-Step Verification** for it (Google Account → Security). App passwords need it.
+3. Create an **app password** (Google Account → Security → 2-Step Verification → App passwords, or search the account settings for "App passwords"). Name it "HOA portal". Google shows a 16-letter password once; copy it. It only lets the portal send and read mail, can't change the account, and you can revoke it there at any time.
+
+Then make a random session key:
 
 ```
 python -c "import secrets; print(secrets.token_urlsafe(48))"
@@ -100,7 +110,9 @@ Put everything in a file outside the repository, for example `~/hoa-secret.json`
   "DROPBOX_APP_KEY": "…",
   "DROPBOX_APP_SECRET": "…",
   "DROPBOX_REFRESH_TOKEN": "…",
-  "ANTHROPIC_API_KEY": "…"
+  "ANTHROPIC_API_KEY": "…",
+  "SMTP_USERNAME": "yourhoa@gmail.com",
+  "SMTP_PASSWORD": "the 16-letter app password, without spaces"
 }
 ```
 
@@ -123,18 +135,26 @@ gh variable set AWS_REGION --body us-east-1
 gh variable set AWS_DEPLOY_ROLE_ARN --body arn:aws:iam::123456789012:role/github-actions-hoa-portal
 gh variable set TF_STATE_BUCKET --body hoa-portal-tfstate-123456789012
 gh variable set HOA_NAME --body "Your HOA name"
-gh variable set EMAIL_DOMAIN --body yourhoa.org
-gh variable set EMAIL_FROM --body "Your HOA <no-reply@yourhoa.org>"
+gh variable set EMAIL_FROM --body "Your HOA <yourhoa@gmail.com>"
 gh variable set MANAGEMENT_NOTIFY_EMAILS --body "office@yourmanagementcompany.com"
 ```
 
-Deploys are skipped until `AWS_DEPLOY_ROLE_ARN` is set, so nothing happens before this step.
+`EMAIL_FROM` must be the Gmail account's own address, or Gmail replaces it with that address. Deploys are skipped until `AWS_DEPLOY_ROLE_ARN` is set, so nothing happens before this step.
 
-### 6. Let SES send email
+### 6. Optional: send through Amazon SES with your own domain
 
-1. `terraform output ses_dkim_records` (in `infra/bootstrap`) prints three CNAME records. Add them at your DNS host. SES shows the domain as verified within a few hours.
+Skip this unless the HOA has a domain and outgrows Gmail's daily limit. SES costs $0.10 per 1,000 emails.
+
+1. Run step 1's `terraform apply` again with `-var email_domain=yourhoa.org` added. Then `terraform output ses_dkim_records` (in `infra/bootstrap`) prints three CNAME records. Add them at your DNS host. SES shows the domain as verified within a few hours.
 2. Add an SPF record if you don't have one (`v=spf1 include:amazonses.com ~all` on the domain) and a DMARC record (`_dmarc.yourhoa.org`, `v=DMARC1; p=none;`).
 3. New SES accounts are in a **sandbox** that only sends to addresses you've verified. In the SES console, choose **Request production access**, and describe it as transactional email for an HOA portal (invitations, password resets, homeowners' questions to management and board announcements to members who signed up). Approval usually takes a day. Until then, you can verify your own address in SES to test.
+4. Switch the portal over and redeploy:
+   ```
+   gh variable set EMAIL_PROVIDER --body ses
+   gh variable set EMAIL_DOMAIN --body yourhoa.org
+   gh variable set EMAIL_FROM --body "Your HOA <no-reply@yourhoa.org>"
+   ```
+   The Gmail login can stay in the secret; it's not used for sending with SES.
 
 ### 7. Deploy
 

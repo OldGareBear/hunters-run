@@ -281,7 +281,13 @@ def test_lambda_environment_passes_production_checks(monkeypatch):
         k: ("placeholder" if "var." in v or "local." in v or "data." in v else v)
         for k, v in env.items()
     }
+    assert 'email_provider = var.email_provider != "" ? var.email_provider : "smtp"' in tf
+    env.pop("SES_REGION", None)  # only with SES
     env.update(
+        EMAIL_PROVIDER="smtp",  # the default: the HOA's Gmail account
+        SMTP_HOST="smtp.gmail.com",
+        SMTP_PORT="587",
+        SMTP_STARTTLS="true",
         HOA_TIMEZONE="America/New_York",
         CHAT_DAILY_LIMIT_PER_USER="20",
         CHAT_MONTHLY_BUDGET_USD="5",
@@ -296,6 +302,8 @@ def test_lambda_environment_passes_production_checks(monkeypatch):
         DROPBOX_APP_SECRET="s",
         DROPBOX_REFRESH_TOKEN="t",
         ANTHROPIC_API_KEY="sk-placeholder",
+        SMTP_USERNAME="yourhoa@gmail.com",
+        SMTP_PASSWORD="app-password",
     )
     assert env["RETRIEVAL"] == "keyword" and env["APP_ENV"] == "production"
     for k, v in env.items():
@@ -303,6 +311,12 @@ def test_lambda_environment_passes_production_checks(monkeypatch):
     s = Settings()
     assert s.is_production and s.retrieval == "keyword" and s.database_null_pool
     assert (s.chat_price_input_per_mtok, s.chat_price_output_per_mtok) == (0.10, 0.50)
+    assert (s.email_provider, s.smtp_port, s.smtp_starttls) == ("smtp", 587, True)
+
+    # Without the Gmail login in the secret, production start-up says what's missing.
+    monkeypatch.delenv("SMTP_PASSWORD")
+    with pytest.raises(ValueError, match="SMTP_USERNAME and SMTP_PASSWORD"):
+        Settings()
 
 
 def test_lambda_gets_no_empty_settings():
