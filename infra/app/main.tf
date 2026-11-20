@@ -26,7 +26,7 @@ locals {
 
   # Non-secret settings. The secrets (database URL, API keys, Dropbox) come from the
   # Secrets Manager secret at start-up; see DEPLOY.md for its contents.
-  env = {
+  env_all = {
     APP_ENV                       = "production"
     AWS_SECRETS_MANAGER_SECRET_ID = data.aws_secretsmanager_secret.app.name
     SECRET_VERSION                = var.secret_version # not read by the app; see variables.tf
@@ -53,6 +53,8 @@ locals {
     MANAGEMENT_NOTIFY_EMAILS      = var.management_notify_emails
     PYTHONDONTWRITEBYTECODE       = "1"
   }
+  # An optional setting left empty is left out, the same to the app as unset.
+  env = { for k, v in local.env_all : k => v if v != "" }
 }
 
 # --- Permissions for the functions --------------------------------------------------

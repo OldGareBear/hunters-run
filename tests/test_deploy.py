@@ -275,7 +275,7 @@ def test_lambda_environment_passes_production_checks(monkeypatch):
     from app.config import Settings
 
     tf = (Path(__file__).parents[1] / "infra/app/main.tf").read_text()
-    block = tf.split("  env = {", 1)[1].split("\n  }", 1)[0]
+    block = tf.split("  env_all = {", 1)[1].split("\n  }", 1)[0]
     env = dict(re.findall(r'^\s*([A-Z_]+)\s*=\s*"?([^"\n]*)"?\s*$', block, re.M))
     env = {
         k: ("placeholder" if "var." in v or "local." in v or "data." in v else v)
@@ -303,6 +303,16 @@ def test_lambda_environment_passes_production_checks(monkeypatch):
     s = Settings()
     assert s.is_production and s.retrieval == "keyword" and s.database_null_pool
     assert (s.chat_price_input_per_mtok, s.chat_price_output_per_mtok) == (0.10, 0.50)
+
+
+def test_lambda_gets_no_empty_settings():
+    import re
+    from pathlib import Path
+
+    tf = (Path(__file__).parents[1] / "infra/app/main.tf").read_text()
+    only_set = r'^\s*env\s*=\s*\{ for k, v in local\.env_all : k => v if v != "" \}$'
+    assert re.search(only_set, tf, re.M)
+    assert tf.count("variables = local.env\n") == 2  # both functions get the filtered map
 
 
 # --- email on AWS --------------------------------------------------------------
