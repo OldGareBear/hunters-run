@@ -39,6 +39,7 @@ class FakeDropbox:
         self._next_id = 0
         self.missing_root = False
         self.unreadable: set[str] = set()  # ids whose download fails
+        self.move_on_download: dict[str, str] = {}  # id -> where it is by the time it's read
 
     # test helpers -------------------------------------------------------------
     def add(self, path: str, data: bytes) -> str:
@@ -112,6 +113,8 @@ class FakeDropbox:
                 return httpx.Response(409, json={"error_summary": "path/not_found/"})
             if fid in self.unreadable:
                 return httpx.Response(409, json={"error_summary": "path/restricted_content/"})
+            if fid in self.move_on_download:
+                self.move(fid, self.move_on_download.pop(fid))
             self.downloads += 1
             # Dropbox describes the file as it is now in a header (ASCII-escaped JSON).
             header = json.dumps(self._meta(fid))
@@ -399,6 +402,49 @@ def test_restored_file_that_cant_be_read_stays_hidden(dropbox, db):
     dropbox_sync.sync(db)
     doc = _docs(db)["/HOA Portal/Board/A.md"]
     assert doc.deleted_at is not None and doc.role_names == ["board"]
+
+
+def test_passing_dropbox_error_on_an_edit_keeps_the_old_text(dropbox, db, make_user):
+    homeowner = make_user(Role.HOMEOWNER)
+    fid = dropbox.add("/HOA Portal/Everyone/Pool rules.md", POOL_TEXT)
+    assert dropbox_sync.sync(db).error == ""
+    # A small edit in the same folder, and Dropbox has a bad minute while it's read.
+    dropbox.edit(fid, POOL_TEXT + b"\n\nGuests must sign in.")
+    dropbox.unreadable.add(fid)
+    result = dropbox_sync.sync(db)
+    assert [f["path"] for f in result.failed] == ["/HOA Portal/Everyone/Pool rules.md"]
+    doc = _docs(db)["/HOA Portal/Everyone/Pool rules.md"]
+    assert doc.status == "ready" and doc.error == ""
+    assert retrieve(db, homeowner, "pool open")  # still answers from the old text
+
+    dropbox.unreadable.clear()  # the next sync tries again
+    assert dropbox_sync.sync(db).updated == ["/HOA Portal/Everyone/Pool rules.md"]
+    texts = " ".join(s.text for s in retrieve(db, homeowner, "guests sign in", min_score=-1))
+    assert "Guests must sign in" in texts
+
+
+@pytest.mark.parametrize("known", [False, True])
+def test_file_moved_while_being_read_waits_for_the_next_sync(dropbox, db, make_user, known):
+    homeowner = make_user(Role.HOMEOWNER)
+    fid = dropbox.add("/HOA Portal/Everyone/Notes.md", POOL_TEXT)
+    if known:
+        dropbox_sync.sync(db)
+    dropbox.edit(fid, BOARD_TEXT)
+    # Listed under Everyone, but in Board/ by the time the sync downloads it.
+    dropbox.move_on_download[fid] = "/HOA Portal/Board/Notes.md"
+    result = dropbox_sync.sync(db)
+    assert [f["path"] for f in result.failed] == ["/HOA Portal/Everyone/Notes.md"]
+    assert all("collections" not in s.text for s in retrieve(db, homeowner, "Lot 7", min_score=-1))
+    docs = _docs(db)
+    if known:  # still the old text, for the old folder's audience, until the next sync
+        assert docs["/HOA Portal/Everyone/Notes.md"].status == "ready"
+    else:
+        assert docs == {}
+
+    dropbox_sync.sync(db)
+    doc = _docs(db)["/HOA Portal/Board/Notes.md"]
+    assert doc.role_names == ["board"] and doc.status == "ready"
+    assert all("collections" not in s.text for s in retrieve(db, homeowner, "Lot 7", min_score=-1))
 
 
 def test_download_checks_the_folder_the_file_is_in_now(dropbox, client_for, db):

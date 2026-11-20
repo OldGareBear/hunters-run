@@ -126,8 +126,15 @@ def _set_access(doc: Document, roles: list[str]) -> None:
     doc.access = [DocumentAccess(role=r) for r in roles]
 
 
+class MovedDuringSync(DropboxError):
+    """The file moved between the listing and the download; the next sync sees where."""
+
+
 def _ingest(db: Session, doc: Document, f: DropboxFile, client: DropboxClient) -> None:
-    data = client.download(f.id)
+    data, now = client.download_with_meta(f.id)
+    if now.path_lower != f.path_lower:
+        # Indexing it under the listing's folder could give it the wrong audience.
+        raise MovedDuringSync("Moved in Dropbox while being read; it's checked again next time")
     doc.content_type = sniff_content_type(f.name, data, None)
     doc.size_bytes = len(data)
     doc.sha256 = hashlib.sha256(data).hexdigest()
@@ -222,7 +229,8 @@ def sync(
                         doc.filename = f.name[:300]
                         doc.title = _title(f.name)
                         changed = True
-                    if doc.role_names != roles:
+                    access_changed = doc.role_names != roles
+                    if access_changed:
                         before = doc.role_names
                         _set_access(doc, roles)
                         audit(
@@ -250,7 +258,11 @@ def sync(
                             _ingest(db, doc, f, client)
                         except (DropboxError, ExtractionError) as exc:
                             db.rollback()
-                            _mark_unreadable(db, doc, exc)
+                            # Old text under a new audience, or text known to be out of
+                            # date: drop it. A passing Dropbox error on a file whose folder
+                            # didn't change keeps the old text; the next sync tries again.
+                            if access_changed or isinstance(exc, ExtractionError):
+                                _mark_unreadable(db, doc, exc)
                             raise
                         doc.deleted_at = None  # a restored file comes back only once read
                         result.updated.append(f.path_display)
