@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Your account{% endblock %}
+{% block content %}
+<h1>Your account</h1>
+{% include "_errors.html" %}
+<section class="card">
+  <h2>Profile</h2>
+  <p class="muted">{{ user.email }} · {{ role_label(user.role) }}</p>
+  <form method="post" action="/account/profile">
+    {{ csrf_input(request) }}
+    <label>Name <input name="full_name" value="{{ user.full_name }}" maxlength="200"></label>
+    <label class="check"><input type="checkbox" name="announcements" value="1" {% if not user.email_opt_out_announcements %}checked{% endif %}> Email me community announcements</label>
+    <p class="muted small">Official notices from the board are always sent.</p>
+    <button>Save</button>
+  </form>
+</section>
+<section class="card">
+  <h2>Change password</h2>
+  <form method="post" action="/account/password">
+    {{ csrf_input(request) }}
+    <label>Current password <input type="password" name="current" autocomplete="current-password" required></label>
+    <label>New password <input type="password" name="new" autocomplete="new-password" required></label>
+    <label>Confirm new password <input type="password" name="confirm" autocomplete="new-password" required></label>
+    <button>Change password</button>
+  </form>
+</section>
+{% endblock %}

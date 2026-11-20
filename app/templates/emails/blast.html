@@ -1,0 +1,8 @@
+{% extends "_layout.html" %}
+{% block body %}
+{% for p in paragraphs %}<p>{{ p | replace("\n", "<br>"|safe) }}</p>{% endfor %}
+{% endblock %}
+{% block footer %}
+{% if official %}Official notice from the {{ hoa_name }} board.{% else %}Sent by {{ sender_name }} for the {{ hoa_name }} board.
+<a href="{{ base_url }}/account" style="color:#8a92a3">Email settings</a>{% endif %}
+{% endblock %}

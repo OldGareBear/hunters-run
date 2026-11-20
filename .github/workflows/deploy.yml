@@ -1,0 +1,118 @@
+name: Deploy
+# Deploys to AWS on every merge to main, after the same checks as pull requests.
+# Uses GitHub's OIDC token to assume the role from infra/bootstrap, so no AWS keys
+# are stored in GitHub. Skips the deploy until AWS_DEPLOY_ROLE_ARN is set
+# (DEPLOY.md, step 5).
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+
+  deploy:
+    needs: checks
+    if: vars.AWS_DEPLOY_ROLE_ARN != ''
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      TF_IN_AUTOMATION: "1"
+      TF_VAR_image_tag: ${{ github.sha }}
+      TF_VAR_hoa_name: ${{ vars.HOA_NAME }}
+      TF_VAR_email_from: ${{ vars.EMAIL_FROM }}
+      TF_VAR_email_domain: ${{ vars.EMAIL_DOMAIN }}
+      TF_VAR_management_notify_emails: ${{ vars.MANAGEMENT_NOTIFY_EMAILS }}
+      TF_VAR_custom_domain: ${{ vars.CUSTOM_DOMAIN }}
+      TF_VAR_custom_domain_certificate_arn: ${{ vars.CUSTOM_DOMAIN_CERTIFICATE_ARN }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push the image
+        env:
+          IMAGE: ${{ steps.ecr.outputs.registry }}/hoa-portal:${{ github.sha }}
+        run: |
+          # Tags are immutable and builds aren't byte-for-byte reproducible, so a re-run
+          # for the same commit reuses the image it pushed the first time.
+          if aws ecr describe-images --repository-name hoa-portal \
+              --image-ids imageTag="$GITHUB_SHA" > /dev/null 2>&1; then
+            echo "The image for $GITHUB_SHA is already in ECR."
+            exit 0
+          fi
+          # --provenance=false: Lambda only accepts single-platform image manifests.
+          docker build -f Dockerfile.lambda --platform linux/amd64 --provenance=false -t "$IMAGE" .
+          docker push "$IMAGE"
+
+      - name: Find the secret's current version
+        run: |
+          # Passed to the functions as SECRET_VERSION, so a new secret value (DEPLOY.md,
+          # step 4) changes their configuration and Lambda starts fresh instances that
+          # read it. Reads only the secret's metadata, never its value.
+          version=$(aws secretsmanager describe-secret --secret-id hoa-portal/production \
+            | jq -r '(.VersionIdsToStages // {}) | to_entries[]
+                     | select(.value | index("AWSCURRENT")) | .key')
+          echo "TF_VAR_secret_version=$version" >> "$GITHUB_ENV"
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.13.0"
+          terraform_wrapper: false
+
+      - name: Update the tasks function
+        working-directory: infra/app
+        run: |
+          terraform init -input=false \
+            -backend-config="bucket=${{ vars.TF_STATE_BUCKET }}" \
+            -backend-config="region=$AWS_REGION"
+          # Only the function that runs migrations (and the policy that lets it read the
+          # secret), so the web function keeps the previous code until they've run.
+          terraform apply -input=false -auto-approve \
+            -target=aws_lambda_function.tasks -target=aws_iam_role_policy.lambda
+
+      - name: Migrate the database
+        env:
+          AWS_MAX_ATTEMPTS: "1" # a timed-out invoke must not start a second migration
+        run: |
+          aws lambda invoke --function-name hoa-portal-tasks --cli-binary-format raw-in-base64-out \
+            --cli-read-timeout 900 --cli-connect-timeout 30 \
+            --payload '{"task": "migrate"}' --log-type Tail result.json > invoke.json
+          cat result.json; echo
+          if jq -e '.FunctionError' invoke.json > /dev/null; then
+            jq -r '.LogResult' invoke.json | base64 -d
+            exit 1
+          fi
+          if grep -q 'newer than this code' result.json; then
+            echo "::warning::The database is at a newer migration than this code, so no migration ran. Fine for a rollback; if this change adds a migration, see DEPLOY.md, Rolling back."
+          fi
+
+      - name: Apply infrastructure
+        working-directory: infra/app
+        run: terraform apply -input=false -auto-approve
+
+      - name: Check the site answers
+        working-directory: infra/app
+        run: |
+          url=$(terraform output -raw url)
+          for i in 1 2 3 4 5; do curl -fsS "$url/healthz" && exit 0; sleep 5; done
+          exit 1
+
+      - name: Summary
+        working-directory: infra/app
+        run: echo "Deployed ${{ github.sha }} to $(terraform output -raw url)" >> "$GITHUB_STEP_SUMMARY"

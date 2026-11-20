@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}People{% endblock %}
+{% block content %}
+<h1>People</h1>
+{% if invite_roles %}
+<section class="card">
+  <h2>Invite someone</h2>
+  <form method="post" action="/admin/invites" class="row">
+    {{ csrf_input(request) }}
+    <label class="grow">Email <input type="email" name="email" required></label>
+    <label>Unit <span class="muted small">(optional)</span> <input type="text" name="unit" maxlength="80" placeholder="e.g. 12B"></label>
+    <label>Role
+      <select name="role">{% for r in invite_roles %}<option value="{{ r.value }}" {% if r.value == "homeowner" %}selected{% endif %}>{{ r.label }}</option>{% endfor %}</select>
+    </label>
+    <button class="primary">Send invite</button>
+  </form>
+</section>
+{% endif %}
+{% if invites %}
+<section class="card">
+  <h2>Pending invites</h2>
+  <table class="table">
+    <thead><tr><th>Email</th><th>Role</th><th>Expires</th><th></th></tr></thead>
+    <tbody>{% for i in invites %}
+      <tr><td>{{ i.email }}</td><td>{{ role_label(i.role) }}</td><td>{{ i.expires_at.strftime("%b %-d") }}</td>
+      <td>{% if has_perm(user, Perm.USERS_MANAGE) or i.invited_by_id == user.id %}
+        <form method="post" action="/admin/invites/{{ i.id }}/revoke" class="inline">{{ csrf_input(request) }}<button class="link danger">Revoke</button></form>{% endif %}</td></tr>
+    {% endfor %}</tbody>
+  </table>
+</section>
+{% endif %}
+<section class="card">
+  <h2>Accounts</h2>
+  <table class="table">
+    <thead><tr><th>Name</th><th>Role</th><th>Unit</th><th>Last sign-in</th><th>Status</th>{% if has_perm(user, Perm.USERS_MANAGE) %}<th></th>{% endif %}</tr></thead>
+    <tbody>{% for p in people %}
+      <tr class="{% if not p.is_active %}inactive{% endif %}">
+        <td>{{ p.display_name }}<div class="muted small">{{ p.email }}</div></td>
+        <td>
+          {% if has_perm(user, Perm.USERS_MANAGE) and p.id != user.id %}
+          <form method="post" action="/admin/users/{{ p.id }}/role" class="inline">
+            {{ csrf_input(request) }}
+            <select name="role" data-autosubmit>{% for r in ALL_ROLES %}<option value="{{ r.value }}" {% if r.value == p.role %}selected{% endif %}>{{ r.label }}</option>{% endfor %}</select>
+            <noscript><button>Save</button></noscript>
+          </form>
+          {% else %}{{ role_label(p.role) }}{% endif %}
+        </td>
+        <td>{% if may_set_unit(user, p) %}
+          <form method="post" action="/admin/users/{{ p.id }}/unit" class="inline unit-form">{{ csrf_input(request) }}
+            <input type="text" name="unit" value="{{ p.unit }}" maxlength="80" aria-label="Unit for {{ p.display_name }}"><button class="link">Save</button></form>
+          {% else %}{{ p.unit }}{% endif %}</td>
+        <td>{{ p.last_login_at.strftime("%b %-d, %Y") if p.last_login_at else "Never" }}</td>
+        <td>{{ "Active" if p.is_active else "Deactivated" }}</td>
+        {% if has_perm(user, Perm.USERS_MANAGE) %}<td>{% if p.id != user.id %}
+          <form method="post" action="/admin/users/{{ p.id }}/active" class="inline">{{ csrf_input(request) }}
+            <input type="hidden" name="active" value="{{ '0' if p.is_active else '1' }}">
+            <button class="link {% if p.is_active %}danger{% endif %}">{{ "Deactivate" if p.is_active else "Reactivate" }}</button></form>
+        {% endif %}</td>{% endif %}
+      </tr>
+    {% endfor %}</tbody>
+  </table>
+</section>
+{% endblock %}

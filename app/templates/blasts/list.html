@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Announcements{% endblock %}
+{% block content %}
+<div class="head-row"><h1>Announcements</h1><a class="button primary" href="/blasts/new">New announcement</a></div>
+<table class="table">
+  <thead><tr><th>Subject</th><th>To</th><th>Status</th><th>Recipients</th><th>By</th></tr></thead>
+  <tbody>{% for b in blasts %}
+    <tr><td><a href="/blasts/{{ b.id }}">{{ b.subject }}</a>{% if b.is_official_notice %} <span class="pill">Official notice</span>{% endif %}</td>
+    <td>{% for r in b.audience_roles %}<span class="pill">{{ role_label(r) }}</span> {% endfor %}</td>
+    <td>{{ "Draft" if b.status == "draft" else "Sent" }}</td><td>{{ b.recipient_count }}</td>
+    <td>{{ b.created_by.display_name if b.created_by else "" }}</td></tr>
+  {% else %}<tr><td colspan="5" class="muted">No announcements yet.</td></tr>{% endfor %}</tbody>
+</table>
+{% endblock %}

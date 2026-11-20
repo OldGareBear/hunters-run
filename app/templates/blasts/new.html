@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}New announcement{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>New announcement</h1>
+  {% include "_errors.html" %}
+  <form method="post" action="/blasts">
+    {{ csrf_input(request) }}
+    <label>Subject <input name="subject" maxlength="200" value="{{ subject or '' }}" required></label>
+    <label>Message <textarea name="body" rows="12" maxlength="20000" required>{{ body or '' }}</textarea></label>
+    <p class="muted small">Plain text. Leave a blank line between paragraphs.</p>
+    <fieldset class="roles"><legend>Send to</legend>
+      {% for r in ALL_ROLES %}<label class="check"><input type="checkbox" name="roles" value="{{ r.value }}" {% if r.value in (roles or []) %}checked{% endif %}> {{ r.label }}s</label>{% endfor %}
+    </fieldset>
+    <label class="check"><input type="checkbox" name="official" value="1" {% if official %}checked{% endif %}> Official notice (also sent to people who opted out of announcements)</label>
+    <button class="primary">Preview</button>
+  </form>
+</section>
+{% endblock %}

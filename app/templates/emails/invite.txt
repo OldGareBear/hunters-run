@@ -1,0 +1,8 @@
+Hello,
+
+{% if inviter %}{{ inviter }} invited you{% else %}You've been invited{% endif %} to the {{ hoa_name }} portal as {{ role_label }}.
+
+Create your account here (the link works once and expires in {{ ttl_days }} days):
+{{ link }}
+
+If you weren't expecting this, you can ignore this email.

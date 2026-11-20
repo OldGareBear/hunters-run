@@ -1,0 +1,6 @@
+{% extends "_layout.html" %}
+{% block body %}
+<p>Your booking for the <strong>{{ space }}</strong> on {{ when }} was cancelled by {{ by }}.</p>
+{% if reason %}<p style="white-space:pre-wrap">Reason: {{ reason }}</p>{% endif %}
+<p><a href="{{ link }}" style="display:inline-block;background:#1f5f99;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none">Book another time</a></p>
+{% endblock %}

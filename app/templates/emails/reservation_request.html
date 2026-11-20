@@ -1,0 +1,7 @@
+{% extends "_layout.html" %}
+{% block body %}
+<p><strong>{{ requester }}</strong> ({{ requester_email }}{% if unit %}, {{ unit }}{% endif %}) asked to book the <strong>{{ space }}</strong>.</p>
+<p>When: {{ when }}</p>
+{% if purpose %}<p style="white-space:pre-wrap">For: {{ purpose }}</p>{% endif %}
+<p><a href="{{ link }}" style="display:inline-block;background:#1f5f99;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none">Approve or decline</a></p>
+{% endblock %}

@@ -1,0 +1,9 @@
+{% extends "_layout.html" %}
+{% block body %}
+<p><strong>{{ requester }}</strong> ({{ requester_email }}{% if unit %}, {{ unit }}{% endif %}) sent this to management from the portal.</p>
+<p><strong>{{ subject_line }}</strong></p>
+{% if details %}<p style="white-space:pre-wrap">{{ details }}</p>{% endif %}
+{% if questions %}<p style="font-size:13px;color:#5b6475">Questions they asked the portal's assistant first:</p>
+<ul style="font-size:13px;color:#5b6475">{% for q in questions %}<li>{{ q }}</li>{% endfor %}</ul>{% endif %}
+<p style="font-size:13px;color:#5b6475">Reply to this email to answer {{ requester }} directly. They are copied on it, and the portal keeps no copy.</p>
+{% endblock %}

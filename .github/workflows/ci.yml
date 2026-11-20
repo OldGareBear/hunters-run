@@ -1,0 +1,60 @@
+name: CI
+on:
+  pull_request:
+  workflow_call: # the deploy workflow runs these checks first
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        db: [sqlite, postgres]
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: hoa_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 2s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[dev]"
+      - run: ruff check . && ruff format --check .
+      - name: Tests
+        env:
+          TEST_DATABASE_URL: ${{ matrix.db == 'postgres' && 'postgresql+psycopg://postgres:postgres@localhost:5432/hoa_test' || '' }}
+        run: pytest -q
+      - name: Migrations apply cleanly
+        if: matrix.db == 'postgres'
+        env:
+          DATABASE_URL: postgresql+psycopg://postgres:postgres@localhost:5432/hoa_test
+        run: |
+          psql "postgresql://postgres:postgres@localhost:5432/hoa_test" -c "drop schema public cascade; create schema public;"
+          alembic upgrade head && alembic check && alembic downgrade base
+
+  infra:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "~1.13.0"
+      - run: terraform fmt -check -diff -recursive infra
+      - name: Validate Terraform
+        run: |
+          for dir in infra/bootstrap infra/app; do
+            terraform -chdir=$dir init -backend=false -input=false
+            terraform -chdir=$dir validate
+          done
+      - name: Build the Lambda image and check it imports
+        run: |
+          docker build -f Dockerfile.lambda --provenance=false -t hoa-portal:ci .
+          docker run --rm --entrypoint python hoa-portal:ci -c "import app.lambda_handler, mangum, app.main; print('ok')"

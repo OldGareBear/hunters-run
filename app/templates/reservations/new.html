@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Book {{ space_label }}{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>{{ space_label }}</h1>
+  <p>Starting {{ when.strftime("%A, %B %-d") }} at {{ fmt_time(when) }}</p>
+  {% if error %}<div class="flash error" role="alert">{{ error }}</div>{% endif %}
+  {% if can_book %}
+  <form method="post" action="/reservations/{{ space }}">
+    {{ csrf_input(request) }}
+    <input type="hidden" name="start" value="{{ start }}">
+    {% if durations %}
+    <label>How long
+      <select name="minutes">{% for m in durations %}<option value="{{ m }}" {% if m == minutes %}selected{% endif %}>{{ fmt_minutes(m) }}</option>{% endfor %}</select>
+    </label>
+    {% else %}<p class="bad">There isn't enough time before closing for a booking at this time.</p>{% endif %}
+    {% if group.rules.ask_purpose %}
+    <label>What's it for? <span class="muted small">(only management sees this)</span>
+      <textarea name="purpose" rows="3" maxlength="2000" required placeholder="For example: birthday party, about 25 guests">{{ purpose or "" }}</textarea>
+    </label>
+    {% endif %}
+    {% if durations %}<button class="primary">{{ "Send request" if group.rules.requires_approval else "Book" }}</button>{% endif %}
+    <a href="/reservations/{{ space }}?week={{ when.date() }}">Back to the calendar</a>
+  </form>
+  {% endif %}
+</section>
+{% if can_block %}
+<section class="card">
+  <h2>Close {{ space_label }} for this time</h2>
+  <p class="muted small">For maintenance or an HOA event. Booking limits don't apply. It can't overlap existing bookings; cancel those first so the people affected are told.</p>
+  <form method="post" action="/reservations/{{ space }}" class="row">
+    {{ csrf_input(request) }}
+    <input type="hidden" name="start" value="{{ start }}">
+    <input type="hidden" name="block" value="1">
+    <label>How long <select name="minutes">{% for m in block_lengths %}<option value="{{ m }}">{{ fmt_minutes(m) }}</option>{% endfor %}</select></label>
+    <label class="grow">Reason <input type="text" name="purpose" maxlength="200" required placeholder="Court resurfacing"></label>
+    <button>Close it</button>
+  </form>
+</section>
+{% endif %}
+<section class="card">
+  <h2>Rules</h2>
+  <ul class="rules">{% for line in rules %}<li>{{ line }}</li>{% endfor %}{% for n in group.notes %}<li>{{ n }}</li>{% endfor %}</ul>
+</section>
+{% endblock %}

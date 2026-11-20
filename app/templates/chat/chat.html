@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Ask{% endblock %}
+{% block main_class %}page wide{% endblock %}
+{% block content %}
+<div class="chat-layout">
+  <aside class="chat-list">
+    <a class="button" href="/chat">New question</a>
+    <ul>
+      {% for c in conversations %}
+      <li class="{% if conv and c.id == conv.id %}active{% endif %}"><a href="/chat/{{ c.id }}">{{ c.title }}</a></li>
+      {% else %}
+      <li class="muted">No conversations yet.</li>
+      {% endfor %}
+    </ul>
+  </aside>
+  <section class="chat">
+    {% if not conv %}
+      <h1>Ask about the community</h1>
+      <p class="muted">Answers come only from documents your account can see, with links to the source. If the documents don't cover it, you can send the question to management.</p>
+      {% if limits.blocked_reason %}
+      <p class="notice">{{ limits.blocked_reason }}{% if has_perm(user, Perm.ASK_MANAGEMENT) %} <a href="/ask-management">Ask management</a>.{% endif %}</p>
+      {% else %}
+      <form method="post" action="/chat" class="ask" data-busy="Looking through the documents...">
+        {{ csrf_input(request) }}
+        <textarea name="question" rows="3" maxlength="4000" placeholder="e.g. What are the pool hours? Can I put up a fence?" required autofocus></textarea>
+        <button class="primary">Ask</button>
+      </form>
+      {% endif %}
+    {% else %}
+      <div class="chat-head">
+        <h1>{{ conv.title }}</h1>
+        <div class="actions">
+          {% if has_perm(user, Perm.ASK_MANAGEMENT) %}<a class="button" href="/chat/{{ conv.id }}/escalate">Ask management</a>{% endif %}
+          <form method="post" action="/chat/{{ conv.id }}/delete" class="inline" data-confirm="Delete this conversation?">{{ csrf_input(request) }}<button class="link danger">Delete</button></form>
+        </div>
+      </div>
+      <ol class="messages">
+        {% for m in conv.messages %}
+        <li class="msg {{ m.role }}" {% if loop.last %}id="latest"{% endif %}>
+          <div class="body">{{ m.content | nl2p }}</div>
+          {% if m.citations %}
+          <ol class="sources">
+            {% for c in m.citations %}
+            <li><span class="n">[{{ c.n }}]</span> <a href="/documents/{{ c.document_id }}">{{ c.title }}</a>{% if c.page %}, page {{ c.page }}{% endif %}
+              {% if c.quote %}<blockquote>{{ c.quote }}</blockquote>{% endif %}</li>
+            {% endfor %}
+          </ol>
+          {% endif %}
+          {% if m.role == "assistant" and not m.answered and has_perm(user, Perm.ASK_MANAGEMENT) %}
+          <p class="escalate-hint">Not what you needed? <a href="/chat/{{ conv.id }}/escalate">Send this question to management</a>.</p>
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ol>
+      {% if limits.blocked_reason %}
+      <p class="notice">{{ limits.blocked_reason }}{% if has_perm(user, Perm.ASK_MANAGEMENT) %} <a href="/chat/{{ conv.id }}/escalate">Ask management</a>.{% endif %}</p>
+      {% else %}
+      <form method="post" action="/chat/{{ conv.id }}/ask" class="ask" data-busy="Looking through the documents...">
+        {{ csrf_input(request) }}
+        <textarea name="question" rows="2" maxlength="4000" placeholder="Ask a follow-up" required></textarea>
+        <button class="primary">Ask</button>
+      </form>
+      {% endif %}
+    {% endif %}
+    <p class="disclaimer">{% if limits.remaining_today is not none and not limits.blocked_reason %}{{ limits.remaining_today }} of {{ limits.daily_limit }} questions left today. {% endif %}{% if show_spend %}Estimated assistant spend this month: ${{ "%.2f" | format(limits.month_spend_usd) }}{% if limits.monthly_budget_usd %} of ${{ "%.2f" | format(limits.monthly_budget_usd) }}{% endif %}. {% endif %}The assistant can make mistakes. The governing documents themselves are what count.</p>
+  </section>
+</div>
+{% endblock %}

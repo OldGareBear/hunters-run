@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Reset your password{% endblock %}
+{% block content %}
+<section class="card narrow">
+  <h1>Reset your password</h1>
+  {% if sent %}
+  <p>If that email belongs to an account, a reset link is on its way. It works for {{ settings().password_reset_ttl_minutes }} minutes.</p>
+  <p><a href="/login">Back to sign in</a></p>
+  {% else %}
+  <form method="post" action="/forgot">
+    {{ csrf_input(request) }}
+    <label>Email <input type="email" name="email" autocomplete="username" required autofocus></label>
+    <button class="primary">Email me a reset link</button>
+  </form>
+  {% endif %}
+</section>
+{% endblock %}

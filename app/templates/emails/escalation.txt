@@ -1,0 +1,14 @@
+{{ requester }} ({{ requester_email }}{% if unit %}, {{ unit }}{% endif %}) sent this to management from the portal.
+
+Subject: {{ subject_line }}
+{% if details %}
+
+{{ details }}
+{% endif %}
+{% if questions %}
+
+Questions they asked the portal's assistant first:
+{% for q in questions %}- {{ " ".join(q.split()) }}
+{% endfor %}{% endif %}
+
+Reply to this email to answer {{ requester }} directly. They are copied on it, and the portal keeps no copy.

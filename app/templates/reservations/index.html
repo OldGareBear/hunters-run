@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Book an amenity{% endblock %}
+{% block content %}
+<div class="head-row">
+  <h1>Book an amenity</h1>
+  {% if has_perm(user, Perm.RESERVATIONS_MANAGE) %}<a class="button" href="/reservations/manage">Requests and bookings{% if pending_count %} ({{ pending_count }} waiting){% endif %}</a>{% endif %}
+</div>
+{% if has_perm(user, Perm.RESERVATIONS_BOOK) %}
+<section class="card">
+  <h2>Your household's bookings</h2>
+  {% if not user.unit %}<p class="muted small">Your account has no unit yet, so your bookings count on their own. Ask management to add your unit so your household shares one set of limits.</p>{% endif %}
+  <table class="table">
+    <thead><tr><th>What</th><th>When</th><th>Status</th></tr></thead>
+    <tbody>{% for r in mine %}
+      <tr><td><a href="/reservations/r/{{ r.id }}">{{ space_name(r) }}</a></td><td>{{ fmt_when(r.start, r.end) }}</td>
+      <td><span class="status {{ r.status }}">{{ "Waiting for approval" if r.status == "pending" else "Confirmed" }}</span></td></tr>
+    {% else %}<tr><td colspan="3" class="muted">Nothing booked.</td></tr>{% endfor %}</tbody>
+  </table>
+</section>
+{% endif %}
+{% for g in groups %}
+<section class="card">
+  <h2>{{ g.label }}</h2>
+  {% if g.description %}<p>{{ g.description }}</p>{% endif %}
+  <p>{% for slug, name in g.spaces.items() %}<a class="button" href="/reservations/{{ slug }}">{{ name }}</a> {% endfor %}</p>
+</section>
+{% endfor %}
+{% endblock %}

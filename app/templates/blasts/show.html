@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}{{ blast.subject }}{% endblock %}
+{% block content %}
+<section class="card">
+  <p class="muted small">{{ "Draft" if blast.status == "draft" else "Sent" }}{% if blast.is_official_notice %} · Official notice{% endif %} ·
+    To {% for r in blast.audience_roles %}{{ role_label(r) }}s{% if not loop.last %}, {% endif %}{% endfor %}</p>
+  <h1>{{ blast.subject }}</h1>
+  <div class="email-preview">{{ blast.body | nl2p }}</div>
+</section>
+{% if blast.status == "draft" %}
+<section class="card">
+  <h2>Send to {{ blast.recipient_count }} {{ "person" if blast.recipient_count == 1 else "people" }}</h2>
+  {% if preview %}<p class="muted small">{% for p in preview %}{{ p.display_name }}{% if not loop.last %}, {% endif %}{% endfor %}{% if blast.recipient_count > preview|length %}, and {{ blast.recipient_count - preview|length }} more{% endif %}</p>{% endif %}
+  <p>Each person gets their own email; nobody sees the other addresses. This can't be unsent.</p>
+  <div class="row">
+    <form method="post" action="/blasts/{{ blast.id }}/send" class="inline" data-confirm="Send this announcement to {{ blast.recipient_count }} people now?">
+      {{ csrf_input(request) }}<input type="hidden" name="confirm_count" value="{{ blast.recipient_count }}">
+      <button class="primary" {% if not blast.recipient_count %}disabled{% endif %}>Send now</button>
+    </form>
+    <form method="post" action="/blasts/{{ blast.id }}/delete" class="inline">{{ csrf_input(request) }}<button class="link danger">Delete draft</button></form>
+  </div>
+</section>
+{% else %}
+<section class="card">
+  <h2>Delivery</h2>
+  <dl class="facts">
+    <dt>Queued</dt><dd>{{ blast.queued_at.strftime("%b %-d, %Y %H:%M UTC") if blast.queued_at else "" }}</dd>
+    <dt>Sent</dt><dd>{{ counts.get("sent", 0) }} of {{ blast.recipient_count }}</dd>
+    <dt>Waiting</dt><dd>{{ counts.get("pending", 0) + counts.get("sending", 0) }}</dd>
+    <dt>Failed</dt><dd>{{ counts.get("failed", 0) }}</dd>
+  </dl>
+</section>
+{% endif %}
+{% endblock %}

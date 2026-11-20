@@ -1,0 +1,8 @@
+{{ requester }} ({{ requester_email }}{% if unit %}, {{ unit }}{% endif %}) asked to book the {{ space }}.
+
+When: {{ when }}
+{% if purpose %}
+For: {{ purpose }}
+{% endif %}
+
+Approve or decline it here: {{ link }}

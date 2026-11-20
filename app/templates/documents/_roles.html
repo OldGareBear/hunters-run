@@ -1,0 +1,7 @@
+<fieldset class="roles">
+  <legend>Who can see it</legend>
+  {% for r in SHAREABLE_ROLES %}
+  <label class="check"><input type="checkbox" name="roles" value="{{ r.value }}" {% if r.value in selected %}checked{% endif %}> {{ r.label }}s</label>
+  {% endfor %}
+  <p class="muted small">Administrators can always see every document. The assistant only uses a document to answer people who can see it.</p>
+</fieldset>
