@@ -1,4 +1,4 @@
-"""The duty calendar: parsing, recurrence, the pages and the reminder emails."""
+"""The duty calendar: parsing, recurrence and the pages."""
 
 import io
 from datetime import date, datetime
@@ -6,8 +6,7 @@ from datetime import date, datetime
 import pytest
 from sqlalchemy import select
 
-from app.config import get_settings
-from app.models import Duty, DutyReminder, EmailMessage
+from app.models import Duty, EmailMessage
 from app.permissions import Role
 from app.services import duties
 from app.services.reservations import tz
@@ -20,7 +19,6 @@ def _duty(db, **kw) -> Duty:
         owners=["board"],
         first_due=date(2027, 1, 15),
         repeat="monthly",
-        remind_days=[7, 0],
     )
     values.update(kw)
     duty = Duty(**values)
@@ -47,13 +45,13 @@ def test_parse_fields():
         owners="Treasurer@Example.org; board, management",
         first_due="3/31/2027",
         repeat="Annually",
-        remind_days="",
+        hard_deadline="Yes",
     )
     assert f.title == "File taxes"
     assert f.owners == ["treasurer@example.org", "board", "management"]
     assert f.first_due == date(2027, 3, 31) and f.repeat == "yearly"
-    assert f.remind_days == [7, 0]
-    assert duties.parse_remind_days("0, 30; 7 7") == [30, 7, 0]
+    assert f.hard_deadline is True
+    assert duties.parse_hard("") is False and duties.parse_hard("x") is True
 
 
 @pytest.mark.parametrize(
@@ -61,16 +59,15 @@ def test_parse_fields():
     [
         ("owners", "homeowners", "homeowners can't own"),
         ("owners", "bob", "isn't an email address"),
-        ("owners", " ; ", "at least one owner"),
         ("first_due", "next week", "isn't a date"),
         ("repeat", "fortnightly", "isn't a repeat"),
-        ("remind_days", "400", "from 0 to 365"),
+        ("hard_deadline", "maybe", "isn't yes or no"),
         ("title", "  ", "add a title"),
     ],
 )
 def test_parse_fields_rejects(field, value, message):
     values = dict(
-        title="x", details="", owners="board", first_due="2027-01-01", repeat="", remind_days=""
+        title="x", details="", owners="board", first_due="2027-01-01", repeat="", hard_deadline=""
     )
     values[field] = value
     with pytest.raises(ValueError, match=message):
@@ -96,7 +93,7 @@ def test_parse_csv_reports_every_bad_row_and_saves_nothing():
 
 
 def test_parse_csv_needs_the_columns():
-    with pytest.raises(duties.DutyError, match="Missing: owners, first_due"):
+    with pytest.raises(duties.DutyError, match="Missing: first_due"):
         duties.parse_csv(b"title\nx\n")
     with pytest.raises(duties.DutyError, match="Unknown columns: due"):
         duties.parse_csv(b"title,owners,first_due,due\nx,board,2027-01-01,y\n")
@@ -111,7 +108,7 @@ def test_template_parses():
 
 
 def _dates(repeat, first, start, end):
-    duty = Duty(title="x", owners=["board"], first_due=first, repeat=repeat, remind_days=[0])
+    duty = Duty(title="x", owners=["board"], first_due=first, repeat=repeat)
     return list(duties.occurrences(duty, start, end))
 
 
@@ -149,78 +146,6 @@ def test_other_repeats():
     assert _dates("none", date(2027, 1, 10), date(2027, 1, 11), date(2028, 1, 1)) == []
 
 
-# --- reminders ----------------------------------------------------------------------
-
-
-def test_reminders_go_out_before_and_on_the_day_once_each(db, make_user):
-    make_user(Role.BOARD, "b1@example.com")
-    make_user(Role.BOARD, "b2@example.com")
-    make_user(Role.BOARD, "gone@example.com", active=False)
-    _duty(db, owners=["board", "treasurer@example.org"])
-
-    assert duties.send_reminders(db, now=_at(2027, 1, 7)) == 0  # 8 days out
-    assert duties.send_reminders(db, now=_at(2027, 1, 8)) == 1  # 7 days out
-    assert duties.send_reminders(db, now=_at(2027, 1, 8, 15)) == 0  # same day, again
-    assert duties.send_reminders(db, now=_at(2027, 1, 12)) == 0
-    assert duties.send_reminders(db, now=_at(2027, 1, 15)) == 1  # on the day
-    assert duties.send_reminders(db, now=_at(2027, 1, 15)) == 0
-
-    mails = _queued(db)
-    assert [m.subject for m in mails] == [
-        "Reminder: Review financials is due in 7 days",
-        "Reminder: Review financials is due today",
-    ]
-    assert mails[0].to_email == "b1@example.com, b2@example.com, treasurer@example.org"
-    assert "Friday, January 15, 2027" in mails[0].text_body
-    # Next month's occurrence gets its own reminders.
-    assert duties.send_reminders(db, now=_at(2027, 2, 8)) == 1
-
-
-def test_a_missed_reminder_goes_out_late_once(db):
-    _duty(db, owners=["a@example.org"], remind_days=[14, 7, 0])
-    assert duties.send_reminders(db, now=_at(2027, 1, 10)) == 1  # the 7-day one, 5 days out
-    assert _queued(db)[0].subject.endswith("due in 5 days")
-    assert duties.send_reminders(db, now=_at(2027, 1, 11)) == 0
-    sent = db.scalars(select(DutyReminder.lead_days)).all()
-    assert sent == [7]  # the skipped 14-day reminder isn't sent after the fact
-
-
-def test_nothing_before_the_reminder_hour(db, monkeypatch):
-    monkeypatch.setattr(get_settings(), "duty_reminder_hour", 7)
-    _duty(db, owners=["a@example.org"])
-    assert duties.send_reminders(db, now=_at(2027, 1, 15, 6)) == 0
-    assert duties.send_reminders(db, now=_at(2027, 1, 15, 7)) == 1
-
-
-def test_a_reminder_already_recorded_is_not_sent_again(db):
-    duty = _duty(db, owners=["a@example.org"])
-    db.add(DutyReminder(duty_id=duty.id, due_on=date(2027, 1, 15), lead_days=0))
-    db.commit()
-    assert duties.send_reminders(db, now=_at(2027, 1, 15)) == 0
-    assert not _queued(db)
-
-
-def test_no_one_to_remind_is_skipped(db):
-    _duty(db, owners=["management"])  # no management accounts
-    assert duties.send_reminders(db, now=_at(2027, 1, 15)) == 0
-    assert db.scalar(select(DutyReminder)) is None  # tried again once someone joins
-
-
-def test_worker_runs_reminders_and_survives_a_failure(db, monkeypatch):
-    from app import worker
-
-    calls = []
-    monkeypatch.setattr(duties, "send_reminders", lambda db: calls.append(1) or 0)
-    worker.run_once(force_sync=True)
-    assert calls == [1]
-
-    def boom(db):
-        raise RuntimeError("bad duty")
-
-    monkeypatch.setattr(duties, "send_reminders", boom)
-    worker.run_once(force_sync=True)  # email delivery still runs
-
-
 # --- pages --------------------------------------------------------------------------
 
 
@@ -237,13 +162,14 @@ def test_upload_adds_and_updates_by_title(client_for, db):
     assert "3 added, 0 updated" in board.get("/duties").text
     resp = _upload(
         board,
-        "title,owners,first_due,repeat,remind_days\n"
-        "renew the master insurance policy,management,2027-07-01,yearly,30\n",
+        "title,owners,first_due,repeat,hard_deadline,remind_days\n"
+        "renew the master insurance policy,,2027-07-01,yearly,no,30\n",
     )
     assert "0 added, 1 updated" in board.get("/duties").text
     db.expire_all()
     duty = db.scalar(select(Duty).where(Duty.title.ilike("renew%")))
-    assert duty.first_due == date(2027, 7, 1) and duty.remind_days == [30]
+    assert duty.first_due == date(2027, 7, 1) and duty.hard_deadline is False
+    assert duty.owners == []  # owners are optional now
     assert duty.title == "renew the master insurance policy"
     assert len(db.scalars(select(Duty)).all()) == 3
 
@@ -264,7 +190,7 @@ def test_add_edit_and_delete(client_for, db):
         "owners": "management",
         "first_due": "2027-05-01",
         "repeat": "yearly",
-        "remind_days": "30; 7",
+        "hard_deadline": "yes",
     }
     assert mgr.post_form("/duties", form).status_code == 303
     duty_id = db.scalar(select(Duty.id))
@@ -276,6 +202,10 @@ def test_add_edit_and_delete(client_for, db):
     assert mgr.post_form(f"/duties/{duty_id}", {**form, "repeat": "quarterly"}).status_code == 303
     db.expire_all()
     assert db.get(Duty, duty_id).repeat == "quarterly"
+    assert db.get(Duty, duty_id).hard_deadline is True
+    assert mgr.post_form(f"/duties/{duty_id}", {**form, "hard_deadline": ""}).status_code == 303
+    db.expire_all()
+    assert db.get(Duty, duty_id).hard_deadline is False
     assert mgr.post_form(f"/duties/{duty_id}/delete").status_code == 303
     db.expire_all()
     assert db.get(Duty, duty_id) is None

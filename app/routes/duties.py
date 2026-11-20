@@ -1,4 +1,4 @@
-"""The duty calendar: recurring board and management duties and their reminder emails."""
+"""The duty calendar: recurring board and management duties, read by the weekly review."""
 
 from __future__ import annotations
 
@@ -75,8 +75,7 @@ def upload(
     db.commit()
     message = f"Uploaded: {added} added, {updated} updated."
     if parsed.grid and added:
-        message += " New duties from the calendar go to the board (management for tasks"
-        message += ' that start "Mgt. Co"); change an owner by opening the duty.'
+        message += " The weekly review works out who should act on each one."
     if parsed.warnings:
         message += " " + " ".join(parsed.warnings[:5])
         if len(parsed.warnings) > 5:
@@ -111,9 +110,8 @@ def _form(request: Request, duty: Duty | None, status: int = 200, **values):
             "owners": "; ".join(duty.owners),
             "first_due": duty.first_due.isoformat(),
             "repeat": duty.repeat,
-            "remind_days": "; ".join(str(n) for n in duty.remind_days),
+            "hard_deadline": "yes" if duty.hard_deadline else "",
         }
-    values.setdefault("remind_days", "7; 0")
     return render(
         request,
         "duties/form.html",
@@ -165,7 +163,7 @@ def create(
     owners: str = Form(""),
     first_due: str = Form(""),
     repeat: str = Form("none"),
-    remind_days: str = Form(""),
+    hard_deadline: str = Form(""),
     user: User = Depends(manager),
     db: Session = Depends(get_db),
 ):
@@ -175,7 +173,7 @@ def create(
         owners=owners,
         first_due=first_due,
         repeat=repeat,
-        remind_days=remind_days,
+        hard_deadline=hard_deadline,
     )
     return _save(request, db, user, None, values)
 
@@ -189,7 +187,7 @@ def update(
     owners: str = Form(""),
     first_due: str = Form(""),
     repeat: str = Form("none"),
-    remind_days: str = Form(""),
+    hard_deadline: str = Form(""),
     user: User = Depends(manager),
     db: Session = Depends(get_db),
 ):
@@ -199,7 +197,7 @@ def update(
         owners=owners,
         first_due=first_due,
         repeat=repeat,
-        remind_days=remind_days,
+        hard_deadline=hard_deadline,
     )
     return _save(request, db, user, _get(db, duty_id), values)
 

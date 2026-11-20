@@ -17,6 +17,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
     text,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -368,28 +369,31 @@ class Reservation(Base):
 
 
 class Duty(Base):
-    """A recurring board or management duty; its owners get reminder emails."""
+    """A recurring board or management duty, raised in the weekly review when it's near."""
 
     __tablename__ = "duties"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     title: Mapped[str] = mapped_column(String(200))
     details: Mapped[str] = mapped_column(Text, default="")
-    # Email addresses and/or role names ("board", "management", "admin").
+    # Who usually does it, if known: email addresses and/or role names ("board",
+    # "management", "admin"). A hint for the weekly review, which picks the owner.
     owners: Mapped[list[str]] = mapped_column(JSON, default=list)
     first_due: Mapped[date] = mapped_column(Date)
     repeat: Mapped[str] = mapped_column(String(20), default="none")
-    remind_days: Mapped[list[int]] = mapped_column(
-        JSON, default=list
-    )  # days before; 0 = on the day
+    # A hard deadline is always in the weekly review from three weeks out.
+    hard_deadline: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    # No longer used (the weekly review replaced fixed reminders); kept for the
+    # previous release, which reads it.
+    remind_days: Mapped[list[int]] = mapped_column(JSON, default=list)
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
     created_at: Mapped[datetime] = _ts(default=utcnow)
     updated_at: Mapped[datetime] = _ts(default=utcnow, onupdate=utcnow)
 
 
 class DutyReminder(Base):
-    """One reminder sent for one occurrence of a duty. The unique key is what stops a
-    reminder going out twice, even if two workers run at once."""
+    """One reminder sent for one occurrence of a duty, by the previous release's fixed
+    reminders. No longer written; kept so that release can still run."""
 
     __tablename__ = "duty_reminders"
     __table_args__ = (UniqueConstraint("duty_id", "due_on", "lead_days"),)
@@ -399,6 +403,25 @@ class DutyReminder(Base):
     due_on: Mapped[date] = mapped_column(Date)
     lead_days: Mapped[int] = mapped_column(Integer)
     sent_at: Mapped[datetime] = _ts(default=utcnow)
+
+
+class WeeklyReview(Base):
+    """One weekly review of the calendar and recent documents. The unique week is what
+    stops a second run (or a second worker) emailing the same week twice."""
+
+    __tablename__ = "weekly_reviews"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    week_start: Mapped[date] = mapped_column(Date, unique=True)  # the Monday
+    status: Mapped[str] = mapped_column(String(20), default="running")  # running|sent|failed
+    # "model" when the assistant wrote it, "plain" for the dates-only fallback.
+    mode: Mapped[str] = mapped_column(String(20), default="")
+    note: Mapped[str] = mapped_column(Text, default="")  # why it fell back, if it did
+    emails: Mapped[int] = mapped_column(Integer, default=0)
+    # Per recipient: the items sent, for the review page and the record.
+    items: Mapped[list[dict]] = mapped_column(JSON, default=list)
+    started_at: Mapped[datetime] = _ts(default=utcnow)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class AuditLog(Base):

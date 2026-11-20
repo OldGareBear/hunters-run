@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Weekly review{% endblock %}
+{% macro digests(rows) %}
+  {% for r in rows %}
+  <h3>{{ r.name }} <span class="muted small">{{ r.email }} · {{ role_label(r.role) }}</span></h3>
+  <ol>{% for i in r["items"] %}
+    <li><strong>{{ i.title }}</strong>{% if i.due %} <span class="muted">(due {{ i.due }}{% if i.hard %}, hard deadline{% endif %})</span>{% endif %}<br>
+    {{ i.action }}{% if i.why %}<br><span class="muted small">Why: {{ i.why }}</span>{% endif %}
+    {% if i.documents %}<br><span class="muted small">From: {{ i.documents | join(", ") }}</span>{% endif %}</li>
+  {% endfor %}</ol>
+  {% else %}<p class="muted">Nobody would get an email: nothing needs acting on.</p>{% endfor %}
+{% endmacro %}
+{% block content %}
+<h1>Weekly review</h1>
+<p class="muted">Every {{ settings().weekly_review_day | capitalize }} from {{ settings().duty_reminder_hour }}:00, the portal reviews the duty calendar and recent documents (meeting minutes above all) and emails board and management members their next best actions. Board members only see what comes from documents the board can read, and management only what management can read. This page is for admins because it shows both.</p>
+
+<section class="card">
+  <h2>Preview this week</h2>
+  <p class="muted small">Works out what would be sent right now, without sending anything. It asks the assistant, so it counts against the monthly assistant budget.</p>
+  <form method="post" action="/admin/weekly-review/preview">{{ csrf_input(request) }}<button class="primary">Preview</button></form>
+  {% if preview is defined %}
+    <p><strong>{{ "Written by the assistant" if plan.mode == "model" else "Plain version (calendar dates only)" }}.</strong> {{ plan.note }}</p>
+    {{ digests(preview) }}
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>Sent</h2>
+  {% for r in reviews %}
+    <details{% if loop.first %} open{% endif %}>
+      <summary>Week of {{ r.week_start.strftime("%b") }} {{ r.week_start.day }}, {{ r.week_start.year }}: {{ r.status }}{% if r.status == "sent" %}, {{ r.emails }} email{{ "" if r.emails == 1 else "s" }} ({{ "assistant" if r.mode == "model" else "plain" }}){% endif %}</summary>
+      {% if r.note %}<p class="muted small">{{ r.note }}</p>{% endif %}
+      {{ digests(r["items"]) }}
+    </details>
+  {% else %}<p class="muted">No weekly review has run yet.</p>{% endfor %}
+</section>
+{% endblock %}

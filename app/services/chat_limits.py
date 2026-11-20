@@ -73,18 +73,23 @@ def status(db: Session, user: User, now: datetime | None = None) -> Status:
             ChatUsage.user_id == user.id, ChatUsage.created_at >= _utc_at(today)
         )
     )
-    spent = db.scalar(
-        select(func.coalesce(func.sum(ChatUsage.cost_micros), 0)).where(
-            ChatUsage.created_at >= _utc_at(month_start)
-        )
-    )
     return Status(
         used_today=int(used_today or 0),
         daily_limit=max(s.chat_daily_limit_per_user, 0),
-        month_spend_usd=int(spent or 0) / 1_000_000,
+        month_spend_usd=month_spend_usd(db, today),
         monthly_budget_usd=max(s.chat_monthly_budget_usd, 0.0),
         resumes_on=resumes_on,
     )
+
+
+def month_spend_usd(db: Session, today: date) -> float:
+    """Estimated spend this month: everyone's questions, plus the weekly review."""
+    spent = db.scalar(
+        select(func.coalesce(func.sum(ChatUsage.cost_micros), 0)).where(
+            ChatUsage.created_at >= _utc_at(today.replace(day=1))
+        )
+    )
+    return int(spent or 0) / 1_000_000
 
 
 def cost_micros(input_tokens: int, output_tokens: int) -> int:
@@ -95,10 +100,15 @@ def cost_micros(input_tokens: int, output_tokens: int) -> int:
 
 
 def record(
-    db: Session, user: User, *, model: str = "", input_tokens: int = 0, output_tokens: int = 0
+    db: Session,
+    user: User | None,
+    *,
+    model: str = "",
+    input_tokens: int = 0,
+    output_tokens: int = 0,
 ) -> ChatUsage:
     row = ChatUsage(
-        user_id=user.id,
+        user_id=user.id if user else None,  # None: the weekly review
         model=model,
         input_tokens=input_tokens,
         output_tokens=output_tokens,

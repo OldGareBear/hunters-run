@@ -1,7 +1,0 @@
-{% extends "_layout.html" %}
-{% block body %}
-<p><strong>{{ title }}</strong> is due {{ when }} ({{ due }}).</p>
-{% if details %}<p style="white-space:pre-wrap">{{ details }}</p>{% endif %}
-{% if repeat != "none" %}<p style="font-size:13px;color:#5b6475">This duty repeats {{ repeat }}.</p>{% endif %}
-<p style="font-size:13px;color:#5b6475">You're getting this because you're listed as an owner of this duty. <a href="{{ link }}">See all duties</a>.</p>
-{% endblock %}

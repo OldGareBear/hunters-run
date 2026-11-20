@@ -252,9 +252,25 @@ class Settings(BaseSettings):
     # How many messages one person can send to management in any 24 hours.
     escalations_per_day: int = Field(default=5, ge=1)
 
-    # --- Duty calendar --------------------------------------------------------
-    # Reminder emails for recurring duties go out from this hour (local time) on.
+    # --- Weekly review --------------------------------------------------------
+    # Once a week the portal reviews the duty calendar and recent documents (meeting
+    # minutes above all) and emails the board and management their next best actions,
+    # only when something is worth acting on. It runs on this day, from this hour
+    # (local time) on.
+    weekly_review_day: Literal[
+        "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday"
+    ] = "monday"
     duty_reminder_hour: int = Field(default=7, ge=0, le=23)
+    weekly_review_enabled: bool = True
+    # Calendar duties this many days ahead are considered.
+    weekly_review_lookahead_days: int = Field(default=21, ge=7, le=90)
+    # Documents added or changed this many days back are read; meeting minutes from
+    # further back, since their action items run longer.
+    weekly_review_document_days: int = Field(default=14, ge=1, le=90)
+    weekly_review_minutes_days: int = Field(default=45, ge=1, le=180)
+    # Cap on the document text sent per audience (board, management), in characters.
+    weekly_review_max_chars: int = Field(default=60_000, ge=5_000, le=400_000)
+    weekly_review_max_tokens: int = Field(default=4000, ge=500, le=32_000)
 
     # --- Reservations -------------------------------------------------------
     # Local time zone for opening hours and calendars (an IANA name).
