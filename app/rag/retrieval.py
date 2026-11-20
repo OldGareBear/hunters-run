@@ -41,7 +41,15 @@ def _cosine(a: list[float], b: list[float]) -> float:
     return dot / (na * nb)
 
 
-def permitted_chunks_query(user: User):
+def _shared_with(roles: list[str]):
+    return exists(
+        select(1).where(DocumentAccess.document_id == Document.id, DocumentAccess.role.in_(roles))
+    )
+
+
+def permitted_chunks_query(user: User, also_visible_to: str | None = None):
+    """Chunks of documents the user may read. With also_visible_to, only documents that
+    role may read too (e.g. what an email to management may quote, with the asker copied)."""
     q = (
         select(DocumentChunk, Document)
         .join(Document, Document.id == DocumentChunk.document_id)
@@ -49,13 +57,9 @@ def permitted_chunks_query(user: User):
     )
     roles = visible_roles_for(user)
     if roles is not None:
-        q = q.where(
-            exists(
-                select(1).where(
-                    DocumentAccess.document_id == Document.id, DocumentAccess.role.in_(roles)
-                )
-            )
-        )
+        q = q.where(_shared_with(roles))
+    if also_visible_to is not None:
+        q = q.where(_shared_with([also_visible_to]))
     return q
 
 
@@ -133,11 +137,17 @@ def _keyword(db: Session, base, query: str, k: int) -> list[tuple]:
 
 
 def retrieve(
-    db: Session, user: User, query: str, *, k: int | None = None, min_score: float | None = None
+    db: Session,
+    user: User,
+    query: str,
+    *,
+    k: int | None = None,
+    min_score: float | None = None,
+    also_visible_to: str | None = None,
 ) -> list[Source]:
     s = get_settings()
     k = k or s.rag_top_k
-    base = permitted_chunks_query(user)
+    base = permitted_chunks_query(user, also_visible_to)
     if s.retrieval == "keyword":
         # Any matching passage counts; the ranking decides which k go to the model.
         scored = _keyword(db, base, query, k)

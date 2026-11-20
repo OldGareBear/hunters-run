@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Ask{% endblock %}
+{% block title %}Ask Hunter{% endblock %}
 {% block main_class %}page wide{% endblock %}
 {% block content %}
 <div class="chat-layout">
@@ -15,12 +15,12 @@
   </aside>
   <section class="chat">
     {% if not conv %}
-      <h1>Ask about the community</h1>
-      <p class="muted">Answers come only from documents your account can see, with links to the source. If the documents don't cover it, you can send the question to management.</p>
+      <h1>Ask Hunter</h1>
+      <p class="muted">Hunter answers questions about the community. Answers come only from documents your account can see, with links to the source. If the documents don't cover it, you can send the question to management.</p>
       {% if limits.blocked_reason %}
       <p class="notice">{{ limits.blocked_reason }}{% if has_perm(user, Perm.ASK_MANAGEMENT) %} <a href="/ask-management">Ask management</a>.{% endif %}</p>
       {% else %}
-      <form method="post" action="/chat" class="ask" data-busy="Looking through the documents...">
+      <form method="post" action="/chat" class="ask" data-busy="Hunter is looking through the documents...">
         {{ csrf_input(request) }}
         <textarea name="question" rows="3" maxlength="4000" placeholder="e.g. What are the pool hours? Can I put up a fence?" required autofocus></textarea>
         <button class="primary">Ask</button>
@@ -37,6 +37,7 @@
       <ol class="messages">
         {% for m in conv.messages %}
         <li class="msg {{ m.role }}" {% if loop.last %}id="latest"{% endif %}>
+          {% if m.role == "assistant" %}<div class="who">Hunter</div>{% endif %}
           <div class="body">{{ m.content | nl2p }}</div>
           {% if m.citations %}
           <ol class="sources">
@@ -55,14 +56,14 @@
       {% if limits.blocked_reason %}
       <p class="notice">{{ limits.blocked_reason }}{% if has_perm(user, Perm.ASK_MANAGEMENT) %} <a href="/chat/{{ conv.id }}/escalate">Ask management</a>.{% endif %}</p>
       {% else %}
-      <form method="post" action="/chat/{{ conv.id }}/ask" class="ask" data-busy="Looking through the documents...">
+      <form method="post" action="/chat/{{ conv.id }}/ask" class="ask" data-busy="Hunter is looking through the documents...">
         {{ csrf_input(request) }}
         <textarea name="question" rows="2" maxlength="4000" placeholder="Ask a follow-up" required></textarea>
         <button class="primary">Ask</button>
       </form>
       {% endif %}
     {% endif %}
-    <p class="disclaimer">{% if limits.remaining_today is not none and not limits.blocked_reason %}{{ limits.remaining_today }} of {{ limits.daily_limit }} questions left today. {% endif %}{% if show_spend %}Estimated assistant spend this month: ${{ "%.2f" | format(limits.month_spend_usd) }}{% if limits.monthly_budget_usd %} of ${{ "%.2f" | format(limits.monthly_budget_usd) }}{% endif %}. {% endif %}The assistant can make mistakes. The governing documents themselves are what count.</p>
+    <p class="disclaimer">{% if limits.remaining_today is not none and not limits.blocked_reason %}{{ limits.remaining_today }} of {{ limits.daily_limit }} questions left today. {% endif %}{% if show_spend %}Estimated Hunter spend this month: ${{ "%.2f" | format(limits.month_spend_usd) }}{% if limits.monthly_budget_usd %} of ${{ "%.2f" | format(limits.monthly_budget_usd) }}{% endif %}. {% endif %}Hunter can make mistakes. The governing documents themselves are what count.</p>
   </section>
 </div>
 {% endblock %}

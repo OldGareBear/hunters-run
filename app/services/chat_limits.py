@@ -1,4 +1,4 @@
-"""Usage limits for the assistant: questions per person per day, spend per month.
+"""Usage limits for Hunter, the chatbot: questions per person per day, spend per month.
 
 Spend is an estimate from the token counts the API reports and the prices in
 settings. The hard stop is the spend limit on the Anthropic API key itself (see
@@ -41,14 +41,14 @@ class Status:
     def blocked_reason(self) -> str:
         if self.over_budget:
             return (
-                "The assistant has used this month's budget and is paused until "
+                "Hunter has used this month's budget and is paused until "
                 f"{self.resumes_on:%B} {self.resumes_on.day}. You can still send your "
                 "question to management, and they'll get back to you."
             )
         if self.remaining_today == 0:
             return (
                 f"You've asked {self.daily_limit} questions today, which is the daily limit. "
-                "The assistant is available again tomorrow. For anything that can't wait, "
+                "Hunter is available again tomorrow. For anything that can't wait, "
                 "send your question to management."
             )
         return ""
@@ -108,7 +108,7 @@ def record(
     output_tokens: int = 0,
 ) -> ChatUsage:
     row = ChatUsage(
-        user_id=user.id if user else None,  # None: the weekly review
+        user_id=user.id if user else None,  # None: the weekly review or escalation context
         model=model,
         input_tokens=input_tokens,
         output_tokens=output_tokens,

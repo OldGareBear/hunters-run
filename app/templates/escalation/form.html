@@ -5,11 +5,14 @@
   <h1>Ask management</h1>
   <p class="muted">This sends an email to the management company with you copied. They'll reply to you by email, and the portal doesn't keep a copy.</p>
   {% if questions %}
-  <p class="muted">The email includes the questions you asked the assistant, so you don't have to repeat yourself. It doesn't include the assistant's answers.</p>
+  <p class="muted">The email includes the questions you asked Hunter, so you don't have to repeat yourself. It doesn't include Hunter's answers.</p>
   <ul class="small">{% for q in questions %}<li>{{ q }}</li>{% endfor %}</ul>
   {% endif %}
+  {% if conv %}
+  <p class="muted">At the end, Hunter adds a short, clearly marked section for management with facts from the documents that bear on your question, such as the rule that applies or a past board decision. It only uses documents you and management can both see.</p>
+  {% endif %}
   {% include "_errors.html" %}
-  <form method="post" action="{{ '/chat/%d/escalate' % conv.id if conv else '/ask-management' }}">
+  <form method="post" action="{{ '/chat/%d/escalate' % conv.id if conv else '/ask-management' }}"{% if conv %} data-busy="Hunter is adding context for management..."{% endif %}>
     {{ csrf_input(request) }}
     <label>Subject <input name="subject" maxlength="200" value="{{ subject or '' }}" required></label>
     <label>Anything else management should know <textarea name="details" rows="6" maxlength="10000">{{ details or '' }}</textarea></label>

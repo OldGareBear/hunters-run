@@ -7,8 +7,23 @@ Subject: {{ subject_line }}
 {% endif %}
 {% if questions %}
 
-Questions they asked the portal's assistant first:
+Questions they asked Hunter, the portal's assistant, first:
 {% for q in questions %}- {{ " ".join(q.split()) }}
 {% endfor %}{% endif %}
 
 Reply to this email to answer {{ requester }} directly. They are copied on it, and the portal keeps no copy.
+{% if context %}
+
+========================================
+Hunter Bot Context
+Added by Hunter, the portal's assistant. {{ requester }} didn't write this part. It comes only from documents {{ requester }} and management can both see, and it can be wrong, so check the source before relying on it.
+========================================
+{% if context.lines %}
+{% for line in context.lines %}- {{ line }}
+{% endfor %}
+
+Sources:
+{% for src in context.sources %}[{{ src.n }}] {{ src.title }}{% if src.page %}, page {{ src.page }}{% endif %}: {{ src.url }}
+{% endfor %}{% else %}
+{{ context.note }}
+{% endif %}{% endif %}
