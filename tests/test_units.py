@@ -108,13 +108,19 @@ def test_outbox_retries_then_fails(db, monkeypatch):
     assert m.status == "failed"
 
 
-def _fake_anthropic(message):
+def _fake_anthropic(message, events=()):
     class Stream:
+        closed = False
+
         def __enter__(self):
             return self
 
         def __exit__(self, *a):
+            Stream.closed = True
             return False
+
+        def __iter__(self):
+            return iter(events)
 
         def get_final_message(self):
             return message
@@ -126,6 +132,7 @@ def _fake_anthropic(message):
         return Stream()
 
     client = SimpleNamespace(beta=SimpleNamespace(messages=SimpleNamespace(stream=stream)))
+    client.stream_class = Stream
     return client, captured
 
 
@@ -224,6 +231,62 @@ def test_anthropic_client_fails_inside_the_request_time_limit(monkeypatch):
     client = AnthropicLLM().client
     assert client.max_retries == 1
     assert (client.timeout.read, client.timeout.connect) == (10.0, 3.0)
+
+
+def test_a_slow_stream_is_abandoned_before_the_request_time_limit(monkeypatch):
+    import app.rag.llm as llm_module
+
+    clock = [1000.0]
+    monkeypatch.setattr(llm_module.time, "monotonic", lambda: clock[0])
+
+    def trickle():  # a chunk every 4 seconds, for a minute
+        for _ in range(15):
+            clock[0] += 4
+            yield SimpleNamespace(type="content_block_delta")
+
+    message = SimpleNamespace(stop_reason="end_turn", model="m", usage=None, content=[])
+    client, _ = _fake_anthropic(message, events=trickle())
+    with pytest.raises(llm_module.AnswerTookTooLong):
+        _llm_with(client).answer(question="x", history=[], sources=SOURCES)
+    assert clock[0] - 1000.0 <= llm_module.ANSWER_DEADLINE_SECONDS + 4  # stopped at once
+    assert client.stream_class.closed  # the connection is let go
+
+
+def test_models_that_always_think_get_room_and_low_effort():
+    from app.config import Settings
+
+    opus = Settings(llm_provider="anthropic", anthropic_model="claude-opus-5-5")
+    assert (opus.anthropic_effort, opus.anthropic_max_tokens) == ("low", 4000)
+    message = SimpleNamespace(
+        stop_reason="end_turn",
+        model="claude-opus-5-5",
+        usage=SimpleNamespace(input_tokens=6000, output_tokens=2500),
+        content=[SimpleNamespace(type="text", text="Yes.", citations=[])],
+    )
+    client, captured = _fake_anthropic(message)
+    llm = _llm_with(client)
+    llm.settings = opus
+    answer = llm.answer(question="x", history=[], sources=SOURCES)
+    assert captured["max_tokens"] == 4000 and captured["output_config"] == {"effort": "low"}
+    assert "thinking" not in captured
+    assert (answer.input_tokens, answer.output_tokens) == (6000, 2500)  # spend from usage
+
+    # An effort or thinking that was asked for is kept; a higher cap too.
+    s = Settings(
+        llm_provider="anthropic", anthropic_model="claude-opus-5-5", anthropic_effort="high"
+    )
+    assert (s.anthropic_effort, s.anthropic_max_tokens) == ("high", 4000)
+    s = Settings(
+        llm_provider="anthropic", anthropic_model="claude-opus-5-5", anthropic_thinking=True
+    )
+    assert s.anthropic_effort == "medium"
+    s = Settings(
+        llm_provider="anthropic", anthropic_model="claude-opus-5-5", anthropic_max_tokens=8000
+    )
+    assert s.anthropic_max_tokens == 8000
+    # Models that can turn thinking off keep the usual settings.
+    haiku = Settings(llm_provider="anthropic", anthropic_model="claude-haiku-5-5")
+    assert (haiku.anthropic_effort, haiku.anthropic_max_tokens) == ("medium", 1000)
 
 
 def test_anthropic_refusal_is_reported():

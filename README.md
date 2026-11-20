@@ -162,7 +162,7 @@ The `Dockerfile` runs the same app as a long-lived server (App Runner, ECS, Fly.
 
 ## Security notes
 
-- **Passwords.** Hashed with Argon2id, at least 12 characters. Sign-in locks for 15 minutes after 5 failures; resetting the password ends the lock, so a stranger guessing at someone's address can't keep them out. A person gets at most 3 reset emails an hour, however often the form is sent. Login and reset pages don't reveal whether an email has an account. Changing your password ends any reset links already sent.
+- **Passwords.** Hashed with Argon2id, at least 12 characters. Sign-in locks for 15 minutes after 5 failures; resetting the password ends the lock. That stops one burst of guesses from keeping someone out, but not a stranger who keeps guessing, who can lock the account again right after a reset; the lock is per account, not per network address. A person gets at most 3 reset emails an hour, however often the form is sent. Login and reset pages don't reveal whether an email has an account. Changing your password ends any reset links already sent.
 - **Sessions.** Random tokens stored hashed, with HttpOnly and SameSite=Lax cookies. Sessions end when a person is deactivated, their role changes or their password changes.
 - **CSRF and headers.** Every form is CSRF-protected. Pages send a strict Content-Security-Policy with no inline scripts.
 - **Files.** Checked by content, not just file name, and size-limited. Encrypted or scanned PDFs without text are listed but can't be searched.

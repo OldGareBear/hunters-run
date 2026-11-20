@@ -43,6 +43,10 @@ class ModelInfo:
     fallbacks: bool  # server-side refusal fallback (`fallbacks: "default"`)
 
 
+# Where thinking can't be turned off, max_tokens covers the thinking and the answer
+# together; at the usual 1,000 answers would often be cut short.
+ALWAYS_THINKING_MIN_TOKENS = 4000
+
 MODELS = {
     # Haiku's price is for prompts up to 100K tokens; the portal's are about 6K.
     "claude-haiku-5-5": ModelInfo(0.10, 0.50, "disabled", fallbacks=False),
@@ -284,6 +288,7 @@ class Settings(BaseSettings):
     def _check_model(self) -> list[str]:
         """Fill in the model's prices, and catch settings the API would reject."""
         info = self.model_info
+        chosen = set(self.model_fields_set)  # before anything below fills in a value
         priced = None not in (self.chat_price_input_per_mtok, self.chat_price_output_per_mtok)
         fallback = max(MODELS.values(), key=lambda m: m.output_per_mtok)  # err on the high side
         if self.chat_price_input_per_mtok is None:
@@ -300,6 +305,12 @@ class Settings(BaseSettings):
                     "prices of; set CHAT_PRICE_INPUT_PER_MTOK and CHAT_PRICE_OUTPUT_PER_MTOK"
                 )
             return problems
+        if info.thinking_off is None:
+            # Thinking stays on. Keep it short unless thinking or an effort was asked for,
+            # and leave room for it and the answer. Spend is still counted from usage.
+            if not self.anthropic_thinking and "anthropic_effort" not in chosen:
+                self.anthropic_effort = "low"
+            self.anthropic_max_tokens = max(self.anthropic_max_tokens, ALWAYS_THINKING_MIN_TOKENS)
         if (
             not self.anthropic_thinking
             and info.thinking_off

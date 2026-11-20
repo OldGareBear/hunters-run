@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Protocol
@@ -74,15 +75,25 @@ def _document_blocks(sources: list[Source]) -> list[dict]:
     ]
 
 
+class AnswerTookTooLong(Exception):
+    """The answer was still streaming at the deadline."""
+
+
+# API Gateway gives up on a request after 29 seconds, so a slow or overloaded API must
+# fail inside that and show ERROR_ANSWER. The SDK's timeouts are per request attempt and,
+# while streaming, per chunk; they don't bound a stream that keeps trickling. So the
+# stream is also abandoned once this many seconds have passed since the call began. A
+# chunk can still take up to the 10 s read timeout to arrive, which keeps the worst case
+# (18 + 10 s, or two tries of ~13 s before the first chunk) under 29 s.
+ANSWER_DEADLINE_SECONDS = 18.0
+
+
 class AnthropicLLM:
     def __init__(self) -> None:
         import anthropic
 
         s = get_settings()
         self.settings = s
-        # API Gateway gives up on a request after 29 seconds, so a slow or overloaded API
-        # must fail inside that and show ERROR_ANSWER: two tries of at most ~13 s each.
-        # The read timeout is per streamed chunk, not for the whole answer.
         self.client = anthropic.Anthropic(
             api_key=s.anthropic_api_key or None,
             timeout=anthropic.Timeout(10.0, connect=3.0),
@@ -117,8 +128,15 @@ class AnthropicLLM:
         if s.anthropic_fallbacks and (info is None or info.fallbacks):
             kwargs["betas"] = ["server-side-fallback-2026-07-01"]
             kwargs["fallbacks"] = "default"
+        deadline = time.monotonic() + ANSWER_DEADLINE_SECONDS
         try:
             with self.client.beta.messages.stream(**kwargs) as stream:
+                for _event in stream:
+                    if time.monotonic() > deadline:
+                        # Leaving the block closes the connection. The tokens used so
+                        # far aren't counted, like any other failed call.
+                        log.error("Anthropic answer still streaming after the deadline")
+                        raise AnswerTookTooLong()
                 msg = stream.get_final_message()
         except anthropic.RateLimitError:
             log.warning("Anthropic rate limit hit")
