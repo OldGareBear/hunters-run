@@ -36,3 +36,11 @@ def test_photo_without_credit(client, static_dir):
     html = client.get("/login").text
     assert "/static/landing.jpg" in html
     assert "<figcaption" not in html
+
+
+def test_shipped_photo_is_served(client):
+    web.landing_photo.cache_clear()
+    assert "/static/landing.jpg" in client.get("/login").text
+    resp = client.get("/static/landing.jpg")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "image/jpeg"
