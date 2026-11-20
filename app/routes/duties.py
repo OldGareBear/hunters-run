@@ -57,15 +57,31 @@ def upload(
     user: User = Depends(manager),
     db: Session = Depends(get_db),
 ):
-    data = file.file.read(duty_service.MAX_CSV_BYTES + 1)
+    data = file.file.read(duty_service.MAX_XLSX_BYTES + 1)
     try:
-        rows = duty_service.parse_csv(data)
+        parsed = duty_service.parse_upload(file.filename or "", data)
     except duty_service.DutyError as exc:
         return _index(request, db, 400, error=str(exc), errors=exc.errors)
-    added, updated = duty_service.import_rows(db, rows, by=user)
-    audit(db, "duties.uploaded", actor=user, request=request, added=added, updated=updated)
+    added, updated = duty_service.import_rows(db, parsed.rows, by=user)
+    audit(
+        db,
+        "duties.uploaded",
+        actor=user,
+        request=request,
+        added=added,
+        updated=updated,
+        calendar=parsed.grid,
+    )
     db.commit()
-    return redirect("/duties", f"Uploaded: {added} added, {updated} updated.")
+    message = f"Uploaded: {added} added, {updated} updated."
+    if parsed.grid and added:
+        message += " New duties from the calendar go to the board (management for tasks"
+        message += ' that start "Mgt. Co"); change an owner by opening the duty.'
+    if parsed.warnings:
+        message += " " + " ".join(parsed.warnings[:5])
+        if len(parsed.warnings) > 5:
+            message += f" ({len(parsed.warnings) - 5} more dates like that.)"
+    return redirect("/duties", message)
 
 
 @router.get("/duties.csv")

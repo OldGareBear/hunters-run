@@ -33,10 +33,15 @@
 
 <section class="card">
   <h2>Upload a spreadsheet</h2>
-  <p class="muted small">A CSV file with the columns title, details, owners, first_due, repeat and remind_days. Owners are email addresses, board or management, separated by semicolons. Repeat is none, weekly, monthly, quarterly, twice a year or yearly. A duty with the same title as one already here is updated; nothing is deleted. If any row has a problem, nothing is saved. <a href="/duties/template.csv">Download a template</a>{% if duties %} or <a href="/duties/duties.csv">download the current duties</a>{% endif %}.</p>
+  <p class="muted small">Either of two layouts, as an Excel file (.xlsx) or a CSV:</p>
+  <ul class="muted small">
+    <li><strong>A month calendar:</strong> January to December across the top, days 1 to 31 down the first column, and a task in each cell. Every task repeats yearly on its day. Owners start as the board (management for tasks that start "Mgt. Co") and keep any change you make here when you upload again. Hard deadlines get an extra reminder 14 days ahead: in Excel, fill the cell with the color of a cell that says "Hard Deadline" (or orange); in a CSV, put ! before or after the task. A day the month doesn't have, like April 31, moves to the month's last day.</li>
+    <li><strong>A list of duties:</strong> a CSV with the columns title, details, owners, first_due, repeat and remind_days. Owners are email addresses, board or management, separated by semicolons. Repeat is none, weekly, monthly, quarterly, twice a year or yearly. <a href="/duties/template.csv">Download a template</a>{% if duties %} or <a href="/duties/duties.csv">download the current duties</a>{% endif %}.</li>
+  </ul>
+  <p class="muted small">A duty with the same title as one already here is updated; nothing is deleted. If anything in the file has a problem, nothing is saved.</p>
   <form method="post" action="/duties/upload" enctype="multipart/form-data">
     {{ csrf_input(request) }}
-    <label>File <input type="file" name="file" accept=".csv,text/csv" required></label>
+    <label>File <input type="file" name="file" accept=".csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required></label>
     <button class="primary">Upload</button>
   </form>
 </section>
