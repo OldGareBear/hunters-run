@@ -133,6 +133,10 @@ To run the full stack with Postgres and the worker instead, use `docker compose 
 
 To use real Claude answers locally, set `LLM_PROVIDER=anthropic` and `ANTHROPIC_API_KEY`. For better search, also set `EMBEDDING_PROVIDER=voyage` and `VOYAGE_API_KEY`, then run `python -m app.cli reindex`.
 
+### The sign-in page photo
+
+Put a photo at `app/static/landing.jpg` (or `.jpeg`, `.png`, `.webp`) and the sign-in page shows it above the form. To credit the photographer, put one line such as `Photo: Jane Doe on Unsplash` in `app/static/landing-credit.txt`. With no photo file the page is just the sign-in card. Keep the photo around 1600 pixels wide and under about 300 KB so the page stays quick on phones. The page's security policy only allows images served by the portal itself, so the file has to live in `app/static`, not on another site.
+
 ### Tests
 
 ```

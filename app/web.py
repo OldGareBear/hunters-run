@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from functools import lru_cache
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -20,6 +21,7 @@ from app.security.auth import CSRF_FIELD, csrf_token_for
 log = logging.getLogger(__name__)
 
 TEMPLATE_DIR = Path(__file__).resolve().parent / "templates"
+STATIC_DIR = Path(__file__).resolve().parent / "static"
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 FLASH_COOKIE = "hoa_flash"
 
@@ -48,8 +50,26 @@ def nl2p(text: str) -> Markup:
     return Markup("").join(para.format(escape(p).replace("\n", br)) for p in paras)
 
 
+# The sign-in page shows app/static/landing.<ext> above the form when that file
+# exists. Swap the photo by replacing the file; landing-credit.txt, if present,
+# holds a one-line credit shown under it.
+LANDING_PHOTO_EXTS = (".jpg", ".jpeg", ".png", ".webp")
+
+
+@lru_cache(maxsize=1)
+def landing_photo() -> dict[str, str] | None:
+    for ext in LANDING_PHOTO_EXTS:
+        if (STATIC_DIR / f"landing{ext}").is_file():
+            credit_file = STATIC_DIR / "landing-credit.txt"
+            credit = credit_file.read_text().strip() if credit_file.is_file() else ""
+            first_line = credit.splitlines()[0] if credit else ""
+            return {"url": f"/static/landing{ext}", "credit": first_line}
+    return None
+
+
 templates.env.globals.update(
     csrf_input=csrf_input,
+    landing_photo=landing_photo,
     has_perm=has_perm,
     Perm=Perm,
     Role=Role,

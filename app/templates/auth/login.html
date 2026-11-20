@@ -1,7 +1,14 @@
 {% extends "base.html" %}
 {% block title %}Sign in{% endblock %}
 {% block content %}
-<section class="card narrow">
+{% set photo = landing_photo() %}
+{% if photo %}
+<figure class="landing-photo">
+  <img src="{{ photo.url }}" alt="">
+  {% if photo.credit %}<figcaption class="muted small">{{ photo.credit }}</figcaption>{% endif %}
+</figure>
+{% endif %}
+<section class="card narrow{% if photo %} below-photo{% endif %}">
   <h1>Sign in</h1>
   {% include "_errors.html" %}
   <form method="post" action="/login">

@@ -106,3 +106,8 @@ code { font-size: .8rem; word-break: break-word; }
 .status.declined, .status.cancelled { background: var(--pill); color: var(--muted); }
 @media (max-width: 900px) { .cal-layout { grid-template-columns: 1fr; } }
 .unit-form input { display: inline-block; width: 7rem; margin: 0 .4rem 0 0; padding: .3rem .45rem; }
+.landing-photo { max-width: 720px; margin: 2rem auto 0; }
+.landing-photo img { display: block; width: 100%; aspect-ratio: 16 / 7; object-fit: cover; border-radius: 10px;
+  border: 1px solid var(--line); background: var(--pill); }
+.landing-photo figcaption { text-align: right; margin-top: .3rem; }
+.card.narrow.below-photo { margin-top: 1.25rem; }
