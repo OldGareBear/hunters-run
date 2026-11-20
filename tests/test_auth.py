@@ -16,7 +16,7 @@ from tests.conftest import PASSWORD, link_from
 
 
 def test_pages_require_login(client):
-    for url in ("/chat", "/documents", "/tickets", "/admin/users", "/blasts"):
+    for url in ("/chat", "/documents", "/ask-management", "/admin/users", "/blasts"):
         resp = client.get(url, follow_redirects=False)
         assert resp.status_code == 303
         assert resp.headers["location"].startswith("/login")
@@ -230,8 +230,8 @@ def test_prune_drops_old_delivered_email(db):
     db.add(blast)
     db.flush()
     for kind, status, blast_id in [
-        ("ticket", "sent", None),
-        ("ticket", "failed", None),
+        ("escalation", "sent", None),
+        ("escalation", "failed", None),
         ("blast", "sent", blast.id),
     ]:
         db.add(
@@ -251,7 +251,7 @@ def test_prune_drops_old_delivered_email(db):
             to_email="y@example.com",
             subject="new",
             text_body="x",
-            kind="ticket",
+            kind="escalation",
             status="sent",
             sent_at=datetime.now(UTC),
         )
@@ -259,4 +259,4 @@ def test_prune_drops_old_delivered_email(db):
     db.commit()
     prune(db)
     left = sorted((m.subject, m.status) for m in db.scalars(select(EmailMessage)))
-    assert left == [("blast", "sent"), ("new", "sent"), ("ticket", "failed")]
+    assert left == [("blast", "sent"), ("escalation", "failed"), ("new", "sent")]

@@ -27,7 +27,7 @@ Both have free Postgres with pgvector. Neon fits Lambda better:
 - **Neon free plan:** **1 GB storage per project**, 100 compute-hours a month, 5 GB of data transfer a month, pgvector and connection pooling included, no card needed. The database sleeps after 5 minutes idle and wakes in under a second on the next request. It is never paused for inactivity.
 - **Supabase free plan:** 500 MB, and the project is **paused after a week without activity** and must be restored by hand, which is a real risk for a portal people use a few times a month. No backups on the free plan.
 
-What Neon's limits mean here: the portal's data (accounts, bookings, tickets and the text of a few hundred documents) is well under 1 GB. Compute is billed only while the database is awake. The hourly background check wakes it 24 times a day for about 5 minutes each, which is about 15 compute-hours a month at the smallest size, leaving plenty for real use. If a limit were ever hit, Neon suspends the database until the next month (it doesn't charge you), so watch the usage page in Neon's console for the first month. The paid plan, if ever needed, is pay-as-you-go at roughly $0.11 per compute-hour.
+What Neon's limits mean here: the portal's data (accounts, bookings and the text of a few hundred documents) is well under 1 GB. Compute is billed only while the database is awake. The hourly background check wakes it 24 times a day for about 5 minutes each, which is about 15 compute-hours a month at the smallest size, leaving plenty for real use. If a limit were ever hit, Neon suspends the database until the next month (it doesn't charge you), so watch the usage page in Neon's console for the first month. The paid plan, if ever needed, is pay-as-you-go at roughly $0.11 per compute-hour.
 
 ### The chatbot and its limits
 
@@ -134,7 +134,7 @@ Deploys are skipped until `AWS_DEPLOY_ROLE_ARN` is set, so nothing happens befor
 
 1. `terraform output ses_dkim_records` (in `infra/bootstrap`) prints three CNAME records. Add them at your DNS host. SES shows the domain as verified within a few hours.
 2. Add an SPF record if you don't have one (`v=spf1 include:amazonses.com ~all` on the domain) and a DMARC record (`_dmarc.yourhoa.org`, `v=DMARC1; p=none;`).
-3. New SES accounts are in a **sandbox** that only sends to addresses you've verified. In the SES console, choose **Request production access**, and describe it as transactional email for an HOA portal (invitations, password resets, ticket updates and board announcements to members who signed up). Approval usually takes a day. Until then, you can verify your own address in SES to test.
+3. New SES accounts are in a **sandbox** that only sends to addresses you've verified. In the SES console, choose **Request production access**, and describe it as transactional email for an HOA portal (invitations, password resets, homeowners' questions to management and board announcements to members who signed up). Approval usually takes a day. Until then, you can verify your own address in SES to test.
 
 ### 7. Deploy
 

@@ -20,12 +20,18 @@ log = logging.getLogger(__name__)
 
 @dataclass
 class OutgoingEmail:
-    to: str
+    to: str  # one or more addresses, comma separated
     subject: str
     text: str
     html: str = ""
     kind: str = "transactional"  # transactional | broadcast
     headers: dict[str, str] = field(default_factory=dict)
+    cc: str = ""  # comma separated
+    reply_to: str = ""  # overrides EMAIL_REPLY_TO for this message
+
+
+def _addresses(value: str) -> list[str]:
+    return [a.strip() for a in value.split(",") if a.strip()]
 
 
 class EmailSendError(Exception):
@@ -48,18 +54,21 @@ class ConsoleProvider:
 
     def send(self, msg: OutgoingEmail) -> str:
         self.sent.append(msg)
-        log.info("EMAIL to=%s subject=%r\n%s", msg.to, msg.subject, msg.text)
+        log.info("EMAIL to=%s cc=%s subject=%r\n%s", msg.to, msg.cc, msg.subject, msg.text)
         return f"console-{len(self.sent)}"
 
 
 def _mime(s: Settings, msg: OutgoingEmail) -> MimeMessage:
     m = MimeMessage()
     m["From"] = s.email_from
-    m["To"] = msg.to
+    m["To"] = ", ".join(_addresses(msg.to))
+    if msg.cc:
+        m["Cc"] = ", ".join(_addresses(msg.cc))
     m["Subject"] = msg.subject
     m["Message-ID"] = make_msgid()
-    if s.email_reply_to:
-        m["Reply-To"] = s.email_reply_to
+    reply_to = msg.reply_to or s.email_reply_to
+    if reply_to:
+        m["Reply-To"] = reply_to
     for k, v in msg.headers.items():
         m[k] = v
     m.set_content(msg.text)
@@ -102,9 +111,11 @@ class SESProvider:
         mime = _mime(self.s, msg)
         kwargs: dict = {
             "FromEmailAddress": self.s.email_from,
-            "Destination": {"ToAddresses": [msg.to]},
+            "Destination": {"ToAddresses": _addresses(msg.to)},
             "Content": {"Raw": {"Data": mime.as_bytes()}},
         }
+        if msg.cc:
+            kwargs["Destination"]["CcAddresses"] = _addresses(msg.cc)
         if self.s.ses_configuration_set:
             kwargs["ConfigurationSetName"] = self.s.ses_configuration_set
         try:
@@ -145,8 +156,10 @@ class PostmarkProvider:
         }
         if msg.html:
             payload["HtmlBody"] = msg.html
-        if s.email_reply_to:
-            payload["ReplyTo"] = s.email_reply_to
+        if msg.cc:
+            payload["Cc"] = ", ".join(_addresses(msg.cc))
+        if msg.reply_to or s.email_reply_to:
+            payload["ReplyTo"] = msg.reply_to or s.email_reply_to
         try:
             res = self.http.post(
                 self.API,

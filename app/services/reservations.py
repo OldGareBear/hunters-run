@@ -22,7 +22,7 @@ from app.db import utcnow
 from app.email.outbox import enqueue
 from app.models import RESERVATION_ACTIVE, Reservation, User
 from app.permissions import Perm, has_perm
-from app.services.tickets import management_recipients
+from app.services.escalation import management_recipients
 
 
 class ReservationError(Exception):

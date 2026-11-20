@@ -31,7 +31,7 @@ variable "email_domain" {
 }
 
 variable "management_notify_emails" {
-  description = "Extra addresses told about new tickets, comma separated."
+  description = "Extra addresses that get homeowners' questions to management, comma separated."
   type        = string
   default     = ""
 }

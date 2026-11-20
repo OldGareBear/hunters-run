@@ -272,45 +272,6 @@ class ChatUsage(Base):
     created_at: Mapped[datetime] = _ts(default=utcnow, index=True)
 
 
-class Ticket(Base):
-    __tablename__ = "tickets"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    subject: Mapped[str] = mapped_column(String(200))
-    status: Mapped[str] = mapped_column(String(20), default="open", index=True)
-    conversation_id: Mapped[int | None] = mapped_column(
-        ForeignKey("conversations.id", ondelete="SET NULL")
-    )
-    created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
-    assigned_to_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
-    created_at: Mapped[datetime] = _ts(default=utcnow)
-    updated_at: Mapped[datetime] = _ts(default=utcnow, onupdate=utcnow)
-
-    created_by: Mapped[User] = relationship(foreign_keys=[created_by_id])
-    assigned_to: Mapped[User | None] = relationship(foreign_keys=[assigned_to_id])
-    conversation: Mapped[Conversation | None] = relationship()
-    messages: Mapped[list[TicketMessage]] = relationship(
-        back_populates="ticket", cascade="all, delete-orphan", order_by="TicketMessage.id"
-    )
-
-
-TICKET_STATUSES = ("open", "in_progress", "waiting_on_homeowner", "resolved", "closed")
-
-
-class TicketMessage(Base):
-    __tablename__ = "ticket_messages"
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    ticket_id: Mapped[int] = mapped_column(ForeignKey("tickets.id", ondelete="CASCADE"), index=True)
-    author_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"))
-    body: Mapped[str] = mapped_column(Text)
-    is_internal: Mapped[bool] = mapped_column(Boolean, default=False)  # staff-only note
-    created_at: Mapped[datetime] = _ts(default=utcnow)
-
-    ticket: Mapped[Ticket] = relationship(back_populates="messages")
-    author: Mapped[User | None] = relationship()
-
-
 class EmailBlast(Base):
     __tablename__ = "email_blasts"
 
@@ -335,11 +296,13 @@ class EmailMessage(Base):
     __table_args__ = (Index("ix_email_messages_status_next", "status", "next_attempt_at"),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    to_email: Mapped[str] = mapped_column(String(320))
+    to_email: Mapped[str] = mapped_column(Text)  # one or more addresses, comma separated
+    cc_email: Mapped[str] = mapped_column(Text, default="", server_default="")
+    reply_to: Mapped[str] = mapped_column(String(320), default="", server_default="")
     subject: Mapped[str] = mapped_column(String(300))
     text_body: Mapped[str] = mapped_column(Text)
     html_body: Mapped[str] = mapped_column(Text, default="")
-    kind: Mapped[str] = mapped_column(String(30))  # invite|reset|blast|ticket
+    kind: Mapped[str] = mapped_column(String(30))  # invite|reset|blast|escalation|reservation
     blast_id: Mapped[int | None] = mapped_column(ForeignKey("email_blasts.id", ondelete="SET NULL"))
     status: Mapped[str] = mapped_column(String(20), default="pending")  # pending|sent|failed
     attempts: Mapped[int] = mapped_column(Integer, default=0)
@@ -431,9 +394,6 @@ __all__ = [
     "PasswordReset",
     "RESERVATION_ACTIVE",
     "Reservation",
-    "TICKET_STATUSES",
-    "Ticket",
-    "TicketMessage",
     "User",
     "UserSession",
 ]

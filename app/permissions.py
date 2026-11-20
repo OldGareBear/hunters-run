@@ -9,10 +9,8 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from app.config import get_settings
-
 if TYPE_CHECKING:  # pragma: no cover
-    from app.models import Document, Ticket, User
+    from app.models import Document, User
 
 
 class Role(StrEnum):
@@ -52,8 +50,7 @@ class Perm(StrEnum):
     USERS_INVITE_HOMEOWNER = "users.invite_homeowner"
     USERS_MANAGE = "users.manage"  # change roles, deactivate
     BLASTS_SEND = "blasts.send"
-    TICKETS_CREATE = "tickets.create"
-    TICKETS_HANDLE = "tickets.handle"
+    ASK_MANAGEMENT = "management.ask"  # email a question to the management company
     AUDIT_VIEW = "audit.view"
     RESERVATIONS_BOOK = "reservations.book"
     # Approve and decline requests, cancel anyone's booking, block time, see who booked.
@@ -71,7 +68,7 @@ POLICY: dict[Role, frozenset[Perm]] = {
             Perm.USERS_INVITE_HOMEOWNER,
             Perm.BLASTS_SEND,
             Perm.AUDIT_VIEW,
-            Perm.TICKETS_CREATE,  # board members are homeowners too
+            Perm.ASK_MANAGEMENT,  # board members are homeowners too
             Perm.RESERVATIONS_BOOK,
         }
     ),
@@ -82,11 +79,10 @@ POLICY: dict[Role, frozenset[Perm]] = {
             Perm.DOCS_MANAGE,
             Perm.USERS_VIEW,
             Perm.USERS_INVITE_HOMEOWNER,
-            Perm.TICKETS_HANDLE,
             Perm.RESERVATIONS_MANAGE,
         }
     ),
-    Role.HOMEOWNER: frozenset({Perm.CHAT, Perm.TICKETS_CREATE, Perm.RESERVATIONS_BOOK}),
+    Role.HOMEOWNER: frozenset({Perm.CHAT, Perm.ASK_MANAGEMENT, Perm.RESERVATIONS_BOOK}),
 }
 
 
@@ -121,13 +117,3 @@ def can_view_document(user: User | None, doc: Document) -> bool:
 
 def can_manage_document(user: User | None, doc: Document) -> bool:
     return has_perm(user, Perm.DOCS_MANAGE) and can_view_document(user, doc)
-
-
-def can_view_ticket(user: User | None, ticket: Ticket) -> bool:
-    if user is None or not user.is_active:
-        return False
-    if has_perm(user, Perm.TICKETS_HANDLE):
-        return True
-    if Role(user.role) == Role.BOARD and get_settings().board_can_view_tickets:
-        return True
-    return ticket.created_by_id == user.id

@@ -333,6 +333,75 @@ def test_ses_access_denied_is_permanent():
     assert exc.value.permanent  # shown in last_error now, not retried for hours
 
 
+def test_ses_sends_to_several_with_a_copy_and_reply_to(monkeypatch):
+    from email import message_from_bytes
+
+    from app.email.providers import OutgoingEmail, SESProvider
+
+    sent = {}
+
+    class Client:
+        def send_email(self, **kw):
+            sent.update(kw)
+            return {"MessageId": "m-1"}
+
+    monkeypatch.setattr(get_settings(), "email_reply_to", "board@example.com")
+    provider = SESProvider.__new__(SESProvider)
+    provider.s, provider.client = get_settings(), Client()
+    msg = OutgoingEmail(
+        to="m1@example.com, m2@example.com",
+        cc="owner@example.com",
+        reply_to="owner@example.com",
+        subject="s",
+        text="t",
+    )
+    assert provider.send(msg) == "m-1"
+    assert sent["Destination"] == {
+        "ToAddresses": ["m1@example.com", "m2@example.com"],
+        "CcAddresses": ["owner@example.com"],
+    }
+    mime = message_from_bytes(sent["Content"]["Raw"]["Data"])
+    assert mime["To"] == "m1@example.com, m2@example.com"
+    assert mime["Cc"] == "owner@example.com"
+    assert mime["Reply-To"] == "owner@example.com"  # this message's, not the default
+
+    sent.clear()
+    provider.send(OutgoingEmail(to="a@example.com", subject="s", text="t"))
+    assert sent["Destination"] == {"ToAddresses": ["a@example.com"]}
+    mime = message_from_bytes(sent["Content"]["Raw"]["Data"])
+    assert mime["Cc"] is None and mime["Reply-To"] == "board@example.com"
+
+
+def test_postmark_sends_the_copy_and_reply_to(monkeypatch):
+    from app.email.providers import OutgoingEmail, PostmarkProvider
+
+    posted = {}
+
+    class Response:
+        status_code = 200
+
+        def json(self):
+            return {"MessageID": "p-1"}
+
+    class Http:
+        def post(self, url, json, headers):
+            posted.update(json)
+            return Response()
+
+    provider = PostmarkProvider.__new__(PostmarkProvider)
+    provider.s, provider.http = get_settings(), Http()
+    msg = OutgoingEmail(
+        to="m1@example.com, m2@example.com",
+        cc="o@example.com",
+        reply_to="o@example.com",
+        subject="s",
+        text="t",
+    )
+    provider.send(msg)
+    assert posted["To"] == "m1@example.com, m2@example.com"
+    assert posted["Cc"] == "o@example.com" and posted["ReplyTo"] == "o@example.com"
+
+
 def test_lambda_may_send_to_sandbox_recipients():
     from pathlib import Path
 

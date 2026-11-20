@@ -23,9 +23,10 @@ def test_policy_matrix():
     assert POLICY[Role.ADMIN] == frozenset(Perm)
     assert Perm.BLASTS_SEND in POLICY[Role.BOARD]
     assert Perm.BLASTS_SEND not in POLICY[Role.MANAGEMENT]
-    assert Perm.TICKETS_HANDLE in POLICY[Role.MANAGEMENT]
+    assert Perm.ASK_MANAGEMENT not in POLICY[Role.MANAGEMENT]
+    assert Perm.ASK_MANAGEMENT in POLICY[Role.BOARD]
     assert POLICY[Role.HOMEOWNER] == frozenset(
-        {Perm.CHAT, Perm.TICKETS_CREATE, Perm.RESERVATIONS_BOOK}
+        {Perm.CHAT, Perm.ASK_MANAGEMENT, Perm.RESERVATIONS_BOOK}
     )
     assert Perm.RESERVATIONS_MANAGE in POLICY[Role.MANAGEMENT]
     assert Perm.RESERVATIONS_MANAGE not in POLICY[Role.BOARD]
@@ -90,7 +91,7 @@ def test_outbox_retries_then_fails(db, monkeypatch):
             raise EmailSendError("temporary")
 
     monkeypatch.setattr(outbox_mod, "get_provider", lambda: Flaky())
-    db.add(EmailMessage(to_email="a@example.com", subject="s", text_body="t", kind="ticket"))
+    db.add(EmailMessage(to_email="a@example.com", subject="s", text_body="t", kind="escalation"))
     db.commit()
     outbox_mod.deliver_pending(db)
     m = db.query(EmailMessage).one()

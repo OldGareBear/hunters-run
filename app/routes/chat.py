@@ -10,8 +10,7 @@ from app.models import Conversation, User
 from app.permissions import Perm, has_perm
 from app.security.auth import require_perm, require_user
 from app.services import chat as chat_service
-from app.services import chat_limits
-from app.services import tickets as ticket_service
+from app.services import chat_limits, escalation
 from app.web import kick_outbox, redirect, render
 
 router = APIRouter()
@@ -114,22 +113,72 @@ def delete_chat(conv_id: int, user: User = Depends(require_user), db: Session = 
     return redirect("/chat", "Conversation deleted.")
 
 
+# --- Asking management --------------------------------------------------------
+# One email to management with the asker copied; the portal keeps nothing else.
+
+SENT_MESSAGE = "Sent to management. You're copied on the email, and their reply will come to you."
+
+
+def _escalation_form(request: Request, conv: Conversation | None, status: int = 200, **ctx):
+    questions = escalation.conversation_questions(conv) if conv else []
+    return render(request, "escalation/form.html", status, conv=conv, questions=questions, **ctx)
+
+
+def _send(
+    request: Request,
+    background: BackgroundTasks,
+    db: Session,
+    user: User,
+    conv: Conversation | None,
+    subject: str,
+    details: str,
+):
+    try:
+        escalation.escalate(db, user=user, subject=subject, details=details, conversation=conv)
+    except escalation.EscalationError as exc:
+        return _escalation_form(
+            request, conv, 400, subject=subject, details=details, error=str(exc)
+        )
+    audit(
+        db,
+        escalation.AUDIT_ACTION,
+        actor=user,
+        target_type="conversation" if conv else "",
+        target_id=conv.id if conv else "",
+        request=request,
+    )
+    db.commit()
+    kick_outbox(background)
+    return redirect(f"/chat/{conv.id}" if conv else "/chat", SENT_MESSAGE)
+
+
+@router.get("/ask-management")
+def ask_management_form(request: Request, user: User = Depends(require_perm(Perm.ASK_MANAGEMENT))):
+    return _escalation_form(request, None)
+
+
+@router.post("/ask-management")
+def ask_management(
+    request: Request,
+    background: BackgroundTasks,
+    subject: str = Form(...),
+    details: str = Form(""),
+    user: User = Depends(require_perm(Perm.ASK_MANAGEMENT)),
+    db: Session = Depends(get_db),
+):
+    return _send(request, background, db, user, None, subject, details)
+
+
 @router.get("/chat/{conv_id}/escalate")
 def escalate_form(
     request: Request,
     conv_id: int,
-    user: User = Depends(require_perm(Perm.TICKETS_CREATE)),
+    user: User = Depends(require_perm(Perm.ASK_MANAGEMENT)),
     db: Session = Depends(get_db),
 ):
     conv = _own_conversation(db, user, conv_id)
     last_q = next((m.content for m in reversed(conv.messages) if m.role == "user"), "")
-    return render(
-        request,
-        "tickets/new.html",
-        conv=conv,
-        questions=ticket_service.conversation_questions(conv),
-        subject=chat_service.title_from(last_q),
-    )
+    return _escalation_form(request, conv, subject=chat_service.title_from(last_q))
 
 
 @router.post("/chat/{conv_id}/escalate")
@@ -142,35 +191,7 @@ def escalate(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    if not has_perm(user, Perm.TICKETS_CREATE):
+    if not has_perm(user, Perm.ASK_MANAGEMENT):
         raise HTTPException(403)
     conv = _own_conversation(db, user, conv_id)
-    try:
-        ticket = ticket_service.escalate(
-            db, user=user, subject=subject, details=details, conversation=conv
-        )
-    except ticket_service.TicketError as exc:
-        return render(
-            request,
-            "tickets/new.html",
-            400,
-            conv=conv,
-            questions=ticket_service.conversation_questions(conv),
-            subject=subject,
-            details=details,
-            error=str(exc),
-        )
-    audit(
-        db,
-        "ticket.created",
-        actor=user,
-        target_type="ticket",
-        target_id=ticket.id,
-        request=request,
-        from_conversation=conv.id,
-    )
-    db.commit()
-    kick_outbox(background)
-    return redirect(
-        f"/tickets/{ticket.id}", "Sent to management. You'll get an email when they reply."
-    )
+    return _send(request, background, db, user, conv, subject, details)

@@ -5,7 +5,7 @@ A private, invite-only website for a homeowners association. It has five parts:
 - **Document library.** The board keeps documents in a Dropbox folder. The portal picks them up automatically, and the subfolder a file is in decides who can see it.
 - **Chatbot.** It answers questions from the documents the person asking is allowed to read, and cites its sources.
 - **Email announcements.** The board can send them to homeowners, with a preview and an audit trail.
-- **Escalation.** When the chatbot can't help, a homeowner can send the question to management as a ticket, and management can reply.
+- **Asking management.** When the chatbot can't help, a homeowner can send the question to management. It goes as an email with the homeowner copied, so management answers by replying and the conversation carries on by email. The portal keeps no copy.
 - **Amenity booking.** Households book the tennis court from a weekly calendar, under limits that keep things fair, and request the clubhouse, which management approves.
 
 Nothing in this repository talks to a paid service unless you configure it. By default it uses an offline chatbot, offline embeddings and console email, so you can run it locally without any API keys.
@@ -22,20 +22,19 @@ People join by invitation only. There is no public sign-up.
 | Invite homeowners | ✓ | ✓ | ✓ | |
 | Invite any role, change roles, deactivate people | ✓ | | | |
 | Send email announcements | ✓ | ✓ | | |
-| Open tickets ("ask management") | ✓ | ✓ | | ✓ |
-| Handle tickets (reply, internal notes, status) | ✓ | | ✓ | |
+| Email a question to management | ✓ | ✓ | | ✓ |
 | View the audit log | ✓ | ✓ | | |
 | Book amenities | ✓ | ✓ | | ✓ |
 | Approve requests, cancel any booking, close a space, see who booked | ✓ | | ✓ | |
 
-The whole policy lives in `app/permissions.py`. Every route checks it on the server, so hiding a button is never the only protection. If someone opens a document they aren't allowed to see, they get a 404 rather than a 403, so the portal doesn't reveal that the document exists. Board members can't see homeowners' tickets unless you set `BOARD_CAN_VIEW_TICKETS=true`.
+The whole policy lives in `app/permissions.py`. Every route checks it on the server, so hiding a button is never the only protection. If someone opens a document they aren't allowed to see, they get a 404 rather than a 403, so the portal doesn't reveal that the document exists.
 
 ## How the chatbot stays inside permissions
 
 1. When a document is added, its text is extracted (PDF, Word, Markdown or plain text), split into overlapping chunks and embedded. The chunks are stored in Postgres with pgvector.
 2. When someone asks a question, the search query itself filters on the document's sharing table (`document_access.role IN (<the asker's role>)`). Text the asker can't read is never retrieved, so it is never sent to the model. `tests/test_chat.py` checks that a homeowner's question never puts board-only text in front of the model.
 3. The permitted passages go to Claude as `document` blocks with citations turned on. The answer is shown with numbered links to the source document and page.
-4. If nothing relevant is found, the model isn't called at all. The chatbot says it couldn't find an answer and offers to send the question to management. The same offer appears under every answer.
+4. If nothing relevant is found, the model isn't called at all. The chatbot says it couldn't find an answer and offers to send the question to management. The same offer appears under every answer. That email copies only the asker's own questions, never the assistant's answers, which may quote documents management can't read.
 5. Short follow-up questions are searched together with the previous question. Earlier turns are replayed as plain text only, so an earlier answer's sources can't leak into a later conversation.
 
 The system prompt tells the model to answer only from the provided documents, to say so when they don't cover the question, and to ignore any instructions written inside a document.
@@ -87,16 +86,16 @@ FastAPI (server-rendered Jinja pages, tiny progressive-enhancement JS)
  ├─ app/rag          permission-filtered retrieval + Claude with citations | OfflineLLM
  ├─ app/email        transactional outbox → Console | SMTP | SES | Postmark
  ├─ app/amenities.py amenity groups and booking rules (from the AMENITIES setting)
- ├─ app/services     accounts, documents, chat, blasts, tickets, reservations
+ ├─ app/services     accounts, documents, chat, blasts, escalation, reservations
  └─ app/worker.py    delivers queued email with retries, prunes expired sessions
 Postgres + pgvector (HNSW cosine index). SQLite works for local dev and tests.
 ```
 
 Some design notes:
 
-- **Email.** Every email is first written to an `email_messages` outbox table in the same transaction as the action that caused it. The worker then delivers the messages with retries and exponential backoff, so a provider outage never loses an announcement or a ticket notification. Announcements go out as one message per recipient and include a `List-Unsubscribe` header.
+- **Email.** Every email is first written to an `email_messages` outbox table in the same transaction as the action that caused it. The worker then delivers the messages with retries and exponential backoff, so a provider outage never loses an announcement or a message to management. Announcements go out as one message per recipient and include a `List-Unsubscribe` header.
 - **Announcements.** The board writes a draft, previews it with an exact recipient count, and confirms by sending that count back. If the audience changed after the preview, the send is refused. Homeowners can opt out of announcements on their account page. A message marked as an official notice (for example, an annual meeting notice) still goes to people who opted out.
-- **Audit log.** Sign-ins, invites, role changes, uploads, downloads, sharing changes, announcements, ticket activity and bookings are all recorded and visible at `/admin/audit`.
+- **Audit log.** Sign-ins, invites, role changes, uploads, downloads, sharing changes, announcements, messages sent to management (that one was sent, not what it said) and bookings are all recorded and visible at `/admin/audit`.
 - **Documents in Dropbox.** Dropbox is the source of truth. The board adds, replaces, renames, moves and deletes files there; the portal never changes anything in Dropbox (its Dropbox app has read-only permissions). The background worker lists the folder and brings the library in step: new files are read and indexed, changed files are re-indexed, and files that were deleted, or moved out of every shared folder, disappear from the portal and the chatbot. It checks every `DROPBOX_SYNC_MINUTES` when run as `python -m app.worker`, and every hour on AWS Lambda (`worker_schedule`, DEPLOY.md). A manager can also press **Check Dropbox now**. A download checks the folder the file is in at that moment, so moving a file to a more private folder stops its old audience downloading it straight away; the chatbot keeps answering from the old text until the next check, so press **Check Dropbox now** after moving a file to restrict it. If a changed file can't be read, it still takes its new folder's access, and its old text leaves the chatbot. Files are tracked by their Dropbox id, so renames and moves don't create duplicates. If the folder suddenly lists as empty, nothing is removed, since that more likely means lost access than a deliberate wipe. The portal keeps the extracted text for search, but not the files: a download is fetched from Dropbox after the portal's own permission check.
 - **Who can see what.** The top-level subfolder decides it, using `DROPBOX_FOLDER_ROLES`. By default:
 

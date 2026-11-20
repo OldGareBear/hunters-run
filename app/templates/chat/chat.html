@@ -18,7 +18,7 @@
       <h1>Ask about the community</h1>
       <p class="muted">Answers come only from documents your account can see, with links to the source. If the documents don't cover it, you can send the question to management.</p>
       {% if limits.blocked_reason %}
-      <p class="notice">{{ limits.blocked_reason }}{% if has_perm(user, Perm.TICKETS_CREATE) %} <a href="/tickets/new">Ask management</a>.{% endif %}</p>
+      <p class="notice">{{ limits.blocked_reason }}{% if has_perm(user, Perm.ASK_MANAGEMENT) %} <a href="/ask-management">Ask management</a>.{% endif %}</p>
       {% else %}
       <form method="post" action="/chat" class="ask" data-busy="Looking through the documents...">
         {{ csrf_input(request) }}
@@ -30,7 +30,7 @@
       <div class="chat-head">
         <h1>{{ conv.title }}</h1>
         <div class="actions">
-          {% if has_perm(user, Perm.TICKETS_CREATE) %}<a class="button" href="/chat/{{ conv.id }}/escalate">Ask management</a>{% endif %}
+          {% if has_perm(user, Perm.ASK_MANAGEMENT) %}<a class="button" href="/chat/{{ conv.id }}/escalate">Ask management</a>{% endif %}
           <form method="post" action="/chat/{{ conv.id }}/delete" class="inline" data-confirm="Delete this conversation?">{{ csrf_input(request) }}<button class="link danger">Delete</button></form>
         </div>
       </div>
@@ -46,14 +46,14 @@
             {% endfor %}
           </ol>
           {% endif %}
-          {% if m.role == "assistant" and not m.answered and has_perm(user, Perm.TICKETS_CREATE) %}
+          {% if m.role == "assistant" and not m.answered and has_perm(user, Perm.ASK_MANAGEMENT) %}
           <p class="escalate-hint">Not what you needed? <a href="/chat/{{ conv.id }}/escalate">Send this question to management</a>.</p>
           {% endif %}
         </li>
         {% endfor %}
       </ol>
       {% if limits.blocked_reason %}
-      <p class="notice">{{ limits.blocked_reason }}{% if has_perm(user, Perm.TICKETS_CREATE) %} <a href="/chat/{{ conv.id }}/escalate">Ask management</a>.{% endif %}</p>
+      <p class="notice">{{ limits.blocked_reason }}{% if has_perm(user, Perm.ASK_MANAGEMENT) %} <a href="/chat/{{ conv.id }}/escalate">Ask management</a>.{% endif %}</p>
       {% else %}
       <form method="post" action="/chat/{{ conv.id }}/ask" class="ask" data-busy="Looking through the documents...">
         {{ csrf_input(request) }}

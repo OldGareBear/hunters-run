@@ -245,11 +245,12 @@ class Settings(BaseSettings):
     postmark_message_stream: str = "outbound"
     postmark_broadcast_stream: str = "broadcast"
 
-    # --- Escalation ---------------------------------------------------------
-    # Extra addresses to notify on new tickets (e.g. the management company's
-    # shared inbox), comma separated. Management users are always notified.
+    # --- Asking management --------------------------------------------------
+    # Extra addresses that get messages homeowners send to management (e.g. the
+    # management company's shared inbox), comma separated. Management users always do.
     management_notify_emails: str = ""
-    board_can_view_tickets: bool = False
+    # How many messages one person can send to management in any 24 hours.
+    escalations_per_day: int = Field(default=5, ge=1)
 
     # --- Reservations -------------------------------------------------------
     # Local time zone for opening hours and calendars (an IANA name).

@@ -3,12 +3,13 @@
 {% block content %}
 <section class="card">
   <h1>Ask management</h1>
+  <p class="muted">This sends an email to the management company with you copied. They'll reply to you by email, and the portal doesn't keep a copy.</p>
   {% if questions %}
-  <p class="muted">Management will see the questions you asked the assistant, so you don't have to repeat yourself. They won't see the assistant's answers.</p>
+  <p class="muted">The email includes the questions you asked the assistant, so you don't have to repeat yourself. It doesn't include the assistant's answers.</p>
   <ul class="small">{% for q in questions %}<li>{{ q }}</li>{% endfor %}</ul>
   {% endif %}
   {% include "_errors.html" %}
-  <form method="post" action="{{ '/chat/%d/escalate' % conv.id if conv else '/tickets' }}">
+  <form method="post" action="{{ '/chat/%d/escalate' % conv.id if conv else '/ask-management' }}">
     {{ csrf_input(request) }}
     <label>Subject <input name="subject" maxlength="200" value="{{ subject or '' }}" required></label>
     <label>Anything else management should know <textarea name="details" rows="6" maxlength="10000">{{ details or '' }}</textarea></label>

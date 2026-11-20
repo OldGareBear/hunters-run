@@ -44,11 +44,16 @@ def enqueue(
     template: str,
     kind: str,
     blast_id: int | None = None,
+    cc: str = "",
+    reply_to: str = "",
     **ctx,
 ) -> EmailMessage:
+    """Queue one message. `to` and `cc` may hold several addresses, comma separated."""
     text, html = render(template, **ctx)
     msg = EmailMessage(
         to_email=to,
+        cc_email=cc,
+        reply_to=reply_to,
         subject=subject,
         text_body=text,
         html_body=html,
@@ -59,13 +64,14 @@ def enqueue(
     return msg
 
 
-# These carry a working sign-in link. The tokens are stored only as hashes elsewhere,
-# so once the message has gone (or will never go) its body isn't kept either.
-SECRET_KINDS = ("invite", "reset")
+# Bodies the portal doesn't keep once the message has gone (or will never go).
+# Invites and resets carry a working sign-in link whose token is stored only as a hash.
+# Messages to management hold a homeowner's question; the inboxes are the record.
+UNKEPT_KINDS = ("invite", "reset", "escalation")
 
 
 def _forget_body(m: EmailMessage) -> None:
-    if m.kind in SECRET_KINDS and m.status in ("sent", "failed"):
+    if m.kind in UNKEPT_KINDS and m.status in ("sent", "failed"):
         m.text_body = m.html_body = ""
 
 
@@ -113,6 +119,8 @@ def deliver_pending(db: Session, *, limit: int = 200) -> int:
             m.provider_message_id = provider.send(
                 OutgoingEmail(
                     to=m.to_email,
+                    cc=m.cc_email,
+                    reply_to=m.reply_to,
                     subject=m.subject,
                     text=m.text_body,
                     html=m.html_body,
