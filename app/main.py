@@ -22,6 +22,7 @@ from app.routes import (
     chat,
     documents,
     duties,
+    inbox,
     reservations,
     weekly_review,
 )
@@ -56,7 +57,18 @@ def create_app() -> FastAPI:
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
     protected = [Depends(csrf_protect)]
-    modules = (auth, chat, documents, reservations, duties, weekly_review, admin, blasts, account)
+    modules = (
+        auth,
+        chat,
+        documents,
+        reservations,
+        duties,
+        inbox,
+        weekly_review,
+        admin,
+        blasts,
+        account,
+    )
     for module in modules:
         app.include_router(module.router, dependencies=protected)
 

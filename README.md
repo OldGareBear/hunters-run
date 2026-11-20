@@ -91,6 +91,13 @@ The Duties page (`/duties`) lists recurring duties, such as reviewing the monthl
 - **Once a week:** a `weekly_reviews` row with a unique week is written before anything is sent. Each email is in the audit log, and email bodies aren't kept after sending.
 - **Admins** can see what each week sent, and preview this week without sending, at `/admin/weekly-review`.
 
+**The inbox to cc** (`app/services/inbound_email.py`, optional): board and management members add the HOA's Gmail address (`INBOX_ADDRESS`) as a recipient on an email chain, and the next weekly review reads it like a document. The portal reads that inbox over IMAP with an app password every `INBOX_FETCH_HOURS` (24) and just before each review.
+
+- **Read-only:** the mailbox is opened with EXAMINE and messages fetched with BODY.PEEK, so nothing there is marked read, moved or deleted. Only SEARCH and FETCH are ever sent, and the portal never sends from it for this.
+- **Senders:** a message is kept only if Gmail's own Authentication-Results header (the topmost one) shows SPF or DKIM passing for the From address's domain, and that address is an active board, admin or management user. Everything else is skipped and not stored.
+- **What's kept:** the text only, no attachments, once per Message-ID, for `INBOX_RETENTION_DAYS` (90).
+- **Who sees it:** the Inbox page (`/inbox`) and the review show board members and admins every kept email, and management only chains a management user or a `MANAGEMENT_NOTIFY_EMAILS` address was on. Homeowners never.
+
 ## Architecture
 
 ```

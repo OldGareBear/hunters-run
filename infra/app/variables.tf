@@ -53,6 +53,12 @@ variable "smtp_port" {
   default     = 587
 }
 
+variable "inbox_address" {
+  description = "Optional: the Gmail address people cc so the weekly review reads the chain (DEPLOY.md, step 10). Usually the account email is sent from."
+  type        = string
+  default     = ""
+}
+
 variable "management_notify_emails" {
   description = "Extra addresses that get homeowners' questions to management, comma separated."
   type        = string

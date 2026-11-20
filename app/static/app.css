@@ -111,3 +111,5 @@ code { font-size: .8rem; word-break: break-word; }
   border: 1px solid var(--line); background: var(--pill); }
 .landing-photo figcaption { text-align: right; margin-top: .3rem; }
 .card.narrow.below-photo { margin-top: 1.25rem; }
+
+.email-body { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; background: #f7f7f5; padding: 1rem; border-radius: 6px; }

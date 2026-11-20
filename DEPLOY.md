@@ -183,6 +183,23 @@ To serve the portal at, say, `portal.yourhoa.org`:
    ```
 3. Re-run the Deploy workflow, then add a CNAME from `portal.yourhoa.org` to the `custom_domain_target` value in its output. Email links switch to the new address automatically.
 
+### 10. Optional: an address to cc, so the weekly review reads email chains
+
+Board and management members can add the HOA's Gmail address as a recipient on any email chain the weekly review should know about, such as a contractor's quote or a renewal notice. The portal reads that inbox once a day and just before each weekly review, and shows what it kept on the **Inbox** page.
+
+It reads the inbox without changing it: nothing is marked read, moved or deleted there, and it never sends from it for this. It keeps a message only when Gmail confirms it really came from an active board, admin or management member of the portal. Vendors' replies and anything else are skipped; a member's reply that quotes them is kept. It keeps the text only, no attachments, and deletes it after 90 days. Management sees only chains a management user or the management company's inbox was on.
+
+To turn it on, use the same Gmail account the portal sends from:
+
+1. In that Gmail account, open Settings → **See all settings** → **Forwarding and POP/IMAP**. If it offers **Enable IMAP**, choose it and save; newer accounts have IMAP on already.
+2. Set the address, then re-run the **Deploy** workflow from the Actions tab:
+   ```
+   gh variable set INBOX_ADDRESS --body yourhoa@gmail.com
+   ```
+   It uses the app password already in the secret (`SMTP_PASSWORD`). To use a separate Gmail account instead, give it its own app password as `INBOX_APP_PASSWORD` in the secret (step 4).
+
+Then tell the board and management the address. Mail that reaches the inbox before it's turned on is read too, back to 10 days.
+
 ## Day to day
 
 - **Deploys** happen on every merge to `main`. A failed test stops the deploy before anything changes. After the image is built, the tasks function moves to the new code and runs the migrations; only then does the web function move. So a failed migration leaves the web pages on the previous code and the workflow fails; fix it and merge again. Until then the tasks function runs the new code against the old schema, and on Lambda it does all the email and Dropbox work: if the release touches a table the migration was meant to change, password resets, invitations, notifications and syncs may fail until the fix deploys.

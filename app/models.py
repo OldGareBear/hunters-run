@@ -424,6 +424,31 @@ class WeeklyReview(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class InboundEmail(Base):
+    """An email read from the inbox people cc (INBOX_ADDRESS), kept for the weekly review.
+
+    Only messages that passed the sender checks are kept, as plain text without
+    attachments, for INBOX_RETENTION_DAYS. `audience` is who may see it: "all" (board and
+    management) when management was on the chain, otherwise "board"."""
+
+    __tablename__ = "inbound_emails"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    message_id: Mapped[str] = mapped_column(String(500), unique=True)
+    from_email: Mapped[str] = mapped_column(String(320))
+    from_name: Mapped[str] = mapped_column(String(200), default="")
+    sender_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    subject: Mapped[str] = mapped_column(String(500), default="")
+    body: Mapped[str] = mapped_column(Text, default="")
+    audience: Mapped[str] = mapped_column(String(20), default="board")
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    received_at: Mapped[datetime] = _ts(default=utcnow, index=True)
+
+    sender: Mapped[User | None] = relationship()
+
+
 class AuditLog(Base):
     __tablename__ = "audit_log"
 
