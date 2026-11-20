@@ -154,12 +154,13 @@ class AnthropicLLM:
                 for _event in stream:
                     if time.monotonic() > deadline:
                         # Leaving the block closes the connection. What was generated
-                        # is still billed, so report it; if the stream gave no usage
-                        # yet, assume the worst (a full answer).
+                        # is still billed, so report it. The snapshot only learns the
+                        # real output count at the end, so assume the worst: a full
+                        # answer.
                         log.error("Anthropic answer still streaming after the deadline")
                         snap = getattr(stream, "current_message_snapshot", None)
                         used = _usage_tokens(getattr(snap, "usage", None))
-                        used["output_tokens"] = used["output_tokens"] or s.anthropic_max_tokens
+                        used["output_tokens"] = max(used["output_tokens"], s.anthropic_max_tokens)
                         raise AnswerTookTooLong(model=s.anthropic_model, **used)
                 msg = stream.get_final_message()
         except anthropic.RateLimitError:
