@@ -3,7 +3,7 @@
 {% block content %}
 <div class="head-row"><h1>Duties</h1><a class="button primary" href="/duties/new">Add a duty</a></div>
 {% include "_errors.html" %}
-<p class="muted">Each duty's owners get an email before it's due, by default 7 days before and on the day. Reminders go out from {{ settings().duty_reminder_hour }}:00 local time.</p>
+<p class="muted">Every {{ settings().weekly_review_day | capitalize }} from {{ settings().duty_reminder_hour }}:00, the portal reviews this calendar and recent documents, meeting minutes above all, and emails the board and management members who need to act. It sends nothing in a week with nothing worth acting on.{% if has_perm(user, Perm.WEEKLY_REVIEW) %} <a href="/admin/weekly-review">See what it sent, or preview this week</a>.{% endif %}</p>
 
 <section class="card">
   <h2>Coming up in the next 90 days</h2>
@@ -20,13 +20,13 @@
 <section class="card">
   <h2>All duties</h2>
   <table class="table">
-    <thead><tr><th>Duty</th><th>Repeats</th><th>Next due</th><th>Reminders</th><th></th></tr></thead>
+    <thead><tr><th>Duty</th><th>Repeats</th><th>Next due</th><th>Usually done by</th><th></th></tr></thead>
     <tbody>{% for d in duties %}
       <tr><td><a href="/duties/{{ d.id }}">{{ d.title }}</a></td>
       <td>{{ d.repeat | capitalize }}</td>
       <td>{% set nd = next_due[d.id] %}{% if nd %}{{ nd.isoformat() }}{% else %}<span class="muted">Done</span>{% endif %}</td>
-      <td class="small">{% for n in d.remind_days %}{{ "on the day" if n == 0 else n ~ " days before" }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
-      <td><form method="post" action="/duties/{{ d.id }}/delete" class="inline" data-confirm="Delete this duty? Its reminders stop.">{{ csrf_input(request) }}<button class="link danger">Delete</button></form></td></tr>
+      <td class="small">{% for o in d.owners %}{{ role_label(o) if "@" not in o else o }}{% if not loop.last %}, {% endif %}{% endfor %}{% if d.hard_deadline %} <span class="pill">Hard deadline</span>{% endif %}</td>
+      <td><form method="post" action="/duties/{{ d.id }}/delete" class="inline" data-confirm="Delete this duty? The weekly review stops raising it.">{{ csrf_input(request) }}<button class="link danger">Delete</button></form></td></tr>
     {% else %}<tr><td colspan="5" class="muted">No duties yet. Add one, or upload a spreadsheet below.</td></tr>{% endfor %}</tbody>
   </table>
 </section>
@@ -35,8 +35,8 @@
   <h2>Upload a spreadsheet</h2>
   <p class="muted small">Either of two layouts, as an Excel file (.xlsx) or a CSV:</p>
   <ul class="muted small">
-    <li><strong>A month calendar:</strong> January to December across the top, days 1 to 31 down the first column, and a task in each cell. Every task repeats yearly on its day. Owners start as the board (management for tasks that start "Mgt. Co") and keep any change you make here when you upload again. Hard deadlines get an extra reminder 14 days ahead: in Excel, fill the cell with the color of a cell that says "Hard Deadline" (or orange); in a CSV, put ! before or after the task. A day the month doesn't have, like April 31, moves to the month's last day.</li>
-    <li><strong>A list of duties:</strong> a CSV with the columns title, details, owners, first_due, repeat and remind_days. Owners are email addresses, board or management, separated by semicolons. Repeat is none, weekly, monthly, quarterly, twice a year or yearly. <a href="/duties/template.csv">Download a template</a>{% if duties %} or <a href="/duties/duties.csv">download the current duties</a>{% endif %}.</li>
+    <li><strong>A month calendar:</strong> January to December across the top, days 1 to 31 down the first column, and a task in each cell. Every task repeats yearly on its day. Who usually does each task starts as the board (management for tasks that start "Mgt. Co"), and any change you make here is kept when you upload again. To mark a hard deadline in Excel, fill the cell with the color of a cell that says "Hard Deadline" (or orange); in a CSV, put ! before or after the task. A day the month doesn't have, like April 31, moves to the month's last day.</li>
+    <li><strong>A list of duties:</strong> a CSV with the columns title, details, owners, first_due, repeat and hard_deadline (yes or blank). Owners are optional: email addresses, board or management, separated by semicolons. Repeat is none, weekly, monthly, quarterly, twice a year or yearly. <a href="/duties/template.csv">Download a template</a>{% if duties %} or <a href="/duties/duties.csv">download the current duties</a>{% endif %}.</li>
   </ul>
   <p class="muted small">A duty with the same title as one already here is updated; nothing is deleted. If anything in the file has a problem, nothing is saved.</p>
   <form method="post" action="/duties/upload" enctype="multipart/form-data">

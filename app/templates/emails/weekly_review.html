@@ -1,0 +1,14 @@
+{% extends "_layout.html" %}
+{% block body %}
+{% if name %}<p>Hi {{ name }},</p>{% endif %}
+<p>Here's what needs you over the next few weeks.</p>
+<ol style="padding-left:20px">
+{% for i in items %}
+  <li style="margin-bottom:14px"><strong>{{ i.title }}</strong>{% if i.due %} <span style="color:#5b6475">(due {{ i.due }}{% if i.hard %}, <strong>hard deadline</strong>{% endif %})</span>{% endif %}<br>
+  {{ i.action }}
+  {% if i.why %}<br><span style="font-size:13px;color:#5b6475">Why you: {{ i.why }}</span>{% endif %}
+  {% for d in i.documents %}<br><span style="font-size:13px">From <a href="{{ d.link }}">{{ d.title }}</a></span>{% endfor %}</li>
+{% endfor %}
+</ol>
+<p style="font-size:13px;color:#5b6475">This review goes out on {{ weekday }}s, and only when something needs you. <a href="{{ link }}">See the duty calendar</a>.</p>
+{% endblock %}

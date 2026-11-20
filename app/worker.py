@@ -1,4 +1,4 @@
-"""Background worker: queues duty reminders, delivers the email outbox, syncs the Dropbox
+"""Background worker: runs the weekly review, delivers the email outbox, syncs the Dropbox
 folder and prunes expired rows.
 
 Run: python -m app.worker            (loops forever)
@@ -46,26 +46,26 @@ def prune(db) -> None:
 
 
 _last_sync = 0.0
-_last_reminders = 0.0
-REMINDER_EVERY_SECONDS = 15 * 60
+_last_review = 0.0
+REVIEW_CHECK_EVERY_SECONDS = 15 * 60
 
 
-def maybe_send_reminders(db, now: float, *, force: bool = False) -> None:
-    """Queue duty reminders that are due (every 15 minutes, or now when forced)."""
-    global _last_reminders
-    if not force and _last_reminders and now - _last_reminders < REMINDER_EVERY_SECONDS:
+def maybe_run_weekly_review(db, now: float, *, force: bool = False) -> None:
+    """Run the weekly review once it's due (checked every 15 minutes, or now when forced)."""
+    global _last_review
+    if not force and _last_review and now - _last_review < REVIEW_CHECK_EVERY_SECONDS:
         return
-    _last_reminders = now
-    from app.services import duties
+    _last_review = now
+    from app.services import weekly_review
 
     try:
-        queued = duties.send_reminders(db)
-    except Exception:  # a bad duty mustn't stop email delivery
+        queued = weekly_review.run_if_due(db)
+    except Exception:  # a bad review mustn't stop email delivery
         db.rollback()
-        log.exception("duty reminders failed")
+        log.exception("weekly review failed")
         return
     if queued:
-        log.info("queued %d duty reminders", queued)
+        log.info("weekly review: queued %d emails", queued)
 
 
 def maybe_sync(db, now: float, *, force: bool = False) -> None:
@@ -93,7 +93,7 @@ def run_once(*, force_sync: bool = False) -> int:
     """One pass. force_sync syncs Dropbox now, e.g. from a schedule that runs hourly."""
     db = session_factory()()
     try:
-        maybe_send_reminders(db, time.monotonic(), force=force_sync)
+        maybe_run_weekly_review(db, time.monotonic(), force=force_sync)
         sent = deliver_pending(db)
         maybe_sync(db, time.monotonic(), force=force_sync)
         prune(db)

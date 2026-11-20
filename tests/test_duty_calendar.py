@@ -107,7 +107,7 @@ def _check_board_calendar(parsed: duties.Parsed) -> None:
     assert by_title["Confirm insurance renewal"].first_due == date(2026, 4, 30)
     assert parsed.warnings == ["Apr 31 isn't a date, so Apr 30 is used."]
 
-    hard = {f.title for f in parsed.rows if f.remind_days == [14, 7, 0]}
+    hard = {f.title for f in parsed.rows if f.hard_deadline}
     assert hard == {
         "Submit pool permit appl.",
         "Confirm insurance renewal",
@@ -116,7 +116,6 @@ def _check_board_calendar(parsed: duties.Parsed) -> None:
         "Distr. Maint. Update to all",
         "Mgt. Co to input maint. Increase for next year",
     }
-    assert all(f.remind_days == [7, 0] for f in parsed.rows if f.title not in hard)
 
     management = {f.title for f in parsed.rows if f.owners == ["management"]}
     assert management == {"Mgt. Co to input maint. Increase for next year"}
@@ -147,8 +146,8 @@ def test_hard_deadline_color_comes_from_the_legend():
     out = io.BytesIO()
     book.save(out)
     parsed = duties.parse_upload("cal.xlsx", out.getvalue(), year=2027)
-    days = {f.title: f.remind_days for f in parsed.rows}
-    assert days == {"Pay the tax bill": [14, 7, 0], "Plant bulbs": [7, 0]}
+    hard = {f.title: f.hard_deadline for f in parsed.rows}
+    assert hard == {"Pay the tax bill": True, "Plant bulbs": False}
 
 
 def test_calendar_cells_with_two_lines_are_two_tasks():
@@ -157,9 +156,9 @@ def test_calendar_cells_with_two_lines_are_two_tasks():
         '3rd,,"Walk the grounds\n!File the report",\n'
     )
     parsed = duties.parse_upload("cal.csv", text.encode(), year=2027)
-    assert [(f.title, f.first_due, f.remind_days) for f in parsed.rows] == [
-        ("File the report", date(2027, 2, 3), [14, 7, 0]),
-        ("Walk the grounds", date(2027, 2, 3), [7, 0]),
+    assert [(f.title, f.first_due, f.hard_deadline) for f in parsed.rows] == [
+        ("File the report", date(2027, 2, 3), True),
+        ("Walk the grounds", date(2027, 2, 3), False),
     ]
 
 
@@ -223,7 +222,7 @@ def test_uploading_again_keeps_owners_and_details_set_on_the_page(client_for, db
             "owners": "treasurer@example.org; board",
             "first_due": duty.first_due.isoformat(),
             "repeat": "yearly",
-            "remind_days": "30; 7",
+            "hard_deadline": "yes",
         },
     )
     assert resp.status_code == 303
@@ -235,5 +234,5 @@ def test_uploading_again_keeps_owners_and_details_set_on_the_page(client_for, db
     duty = db.get(Duty, duty.id)
     assert duty.owners == ["treasurer@example.org", "board"]
     assert duty.details == "Start from last year's actuals."
-    assert duty.remind_days == [7, 0]  # the calendar sets the reminders
+    assert duty.hard_deadline is False  # the calendar sets the hard deadline
     assert len(db.scalars(select(Duty)).all()) == 29

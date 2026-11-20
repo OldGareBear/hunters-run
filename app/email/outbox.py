@@ -67,7 +67,9 @@ def enqueue(
 # Bodies the portal doesn't keep once the message has gone (or will never go).
 # Invites and resets carry a working sign-in link whose token is stored only as a hash.
 # Messages to management hold a homeowner's question; the inboxes are the record.
-UNKEPT_KINDS = ("invite", "reset", "escalation")
+# Weekly reviews quote board-only or management-only documents; the review page keeps
+# what was sent, for admins.
+UNKEPT_KINDS = ("invite", "reset", "escalation", "weekly")
 
 
 def _forget_body(m: EmailMessage) -> None:

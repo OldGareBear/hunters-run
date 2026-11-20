@@ -6,7 +6,7 @@ A private, invite-only website for a homeowners association. It has six parts:
 - **Chatbot.** It answers questions from the documents the person asking is allowed to read, and cites its sources.
 - **Email announcements.** The board can send them to homeowners, with a preview and an audit trail.
 - **Asking management.** When the chatbot can't help, a homeowner can send the question to management. It goes as an email with the homeowner copied, so management answers by replying and the conversation carries on by email. The portal keeps no copy.
-- **Duty calendar.** Recurring board and management duties, uploaded as a spreadsheet or added one at a time. Each duty's owners get reminder emails before it's due.
+- **Duty calendar and weekly review.** Recurring board and management duties, uploaded as the board's month-grid calendar (Excel or CSV), a CSV list, or one at a time. Once a week the portal reviews the calendar and recent documents, meeting minutes above all, and emails board and management members their next best actions, only when something needs them.
 - **Amenity booking.** Households book the tennis court from a weekly calendar, under limits that keep things fair, and request the clubhouse, which management approves.
 
 Nothing in this repository talks to a paid service unless you configure it. By default it uses an offline chatbot, offline embeddings and console email, so you can run it locally without any API keys.
@@ -73,14 +73,23 @@ With one court, a household can book once a day, so the 2-hour gap only starts t
             "max_per_day": 2, "max_per_week": 4}}
 ```
 
-## Duty calendar
+## Duty calendar and weekly review
 
 The Duties page (`/duties`) lists recurring duties, such as reviewing the monthly financials or renewing the insurance policy, and what's due in the next 90 days.
 
-- **Upload:** a CSV file with the columns `title`, `details`, `owners`, `first_due`, `repeat` and `remind_days`. The page links to a template and to a download of the current duties, so the spreadsheet can be edited and uploaded again. A row with the same title as an existing duty updates it, and nothing is ever deleted by an upload. If any row has a problem, nothing is saved and the page lists each bad row.
-- **Owners:** email addresses, `board` or `management`, separated by semicolons. A role means every active account with that role at the time the reminder goes out. Homeowners can't be owners, so a duty can never email the whole community.
+- **Upload:** either the board's month calendar (January to December across the top, days 1 to 31 down the first column, a task in each cell, each repeating yearly), as an Excel file or a CSV; or a CSV list with the columns `title`, `details`, `owners`, `first_due`, `repeat` and `hard_deadline`. A duty with the same title as an existing one is updated, and nothing is ever deleted by an upload. If anything has a problem, nothing is saved and the page lists each problem. In the month calendar, a hard deadline is a cell filled with the color of the cell reading "Hard Deadline" (orange if there isn't one), or a `!` before or after the task in a CSV. A day the month lacks, such as April 31, moves to the month's last day with a warning.
+- **Owners** are optional: a hint (email addresses, `board` or `management`) for the weekly review. Owners and details changed on the page are kept when the calendar is uploaded again.
 - **Repeats:** none, weekly, monthly, quarterly, twice a year or yearly. A monthly duty on the 31st falls on the last day of shorter months.
-- **Reminders:** by default 7 days before and on the day, from 7 AM local time (`DUTY_REMINDER_HOUR`). The hourly background job sends them, one email per reminder with all the owners on it. Each reminder sent is recorded with a unique key, so it never goes out twice, even if the job runs twice at once. If the job misses a day, the reminder goes out late once instead of not at all.
+
+**The weekly review** (`app/services/weekly_review.py`) runs on `WEEKLY_REVIEW_DAY` (Monday) from `DUTY_REMINDER_HOUR` (7 AM local), from the hourly background job. It emails each board or management member one digest of their next best actions, and nobody in a week with nothing worth acting on.
+
+- **Dates come from code.** Duties due in the next 21 days are the candidates. Hard deadlines in that window and anything due within a week are always included; if the assistant leaves one out, a plain line is added for the duty's usual owners.
+- **The assistant** (the same model and monthly budget as the chatbot) ranks the candidates, writes each action and a "why you" line, picks who should act, and adds actions from recent documents: open action items in meeting minutes (documents whose title or folder says "minutes", read back 45 days) and deadlines in other documents changed in the last 14 days. Only high-signal actions are sent.
+- **Permissions:** the review runs once for the board (board members and admins, with documents the board can read) and once for management (management users and `MANAGEMENT_NOTIFY_EMAILS`, with documents management can read), so board-only material never reaches management. Recipients come only from those lists, picked by id. Homeowners are never included.
+- **Checks:** document text is data. Every id in the assistant's answer must be one it was given, links and contact details are removed from what it writes, and every action must rest on a duty or a document.
+- **Fallback:** with the assistant off, over budget or failing, the plain version goes out: the required duties, to their usual owners.
+- **Once a week:** a `weekly_reviews` row with a unique week is written before anything is sent. Each email is in the audit log, and email bodies aren't kept after sending.
+- **Admins** can see what each week sent, and preview this week without sending, at `/admin/weekly-review`.
 
 ## Architecture
 
@@ -97,7 +106,7 @@ FastAPI (server-rendered Jinja pages, tiny progressive-enhancement JS)
  ├─ app/rag          permission-filtered retrieval + Claude with citations | OfflineLLM
  ├─ app/email        transactional outbox → Console | SMTP | SES | Postmark
  ├─ app/amenities.py amenity groups and booking rules (from the AMENITIES setting)
- ├─ app/services     accounts, documents, chat, blasts, duties, escalation, reservations
+ ├─ app/services     accounts, documents, chat, blasts, duties, weekly_review, escalation, reservations
  └─ app/worker.py    delivers queued email with retries, prunes expired sessions
 Postgres + pgvector (HNSW cosine index). SQLite works for local dev and tests.
 ```

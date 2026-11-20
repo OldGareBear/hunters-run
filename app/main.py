@@ -14,7 +14,17 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.config import get_settings
 from app.db import session_factory
-from app.routes import account, admin, auth, blasts, chat, documents, duties, reservations
+from app.routes import (
+    account,
+    admin,
+    auth,
+    blasts,
+    chat,
+    documents,
+    duties,
+    reservations,
+    weekly_review,
+)
 from app.security.auth import (
     CSRF_COOKIE,
     CSRFError,
@@ -46,7 +56,8 @@ def create_app() -> FastAPI:
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
     protected = [Depends(csrf_protect)]
-    for module in (auth, chat, documents, reservations, duties, admin, blasts, account):
+    modules = (auth, chat, documents, reservations, duties, weekly_review, admin, blasts, account)
+    for module in modules:
         app.include_router(module.router, dependencies=protected)
 
     @app.get("/healthz", include_in_schema=False)

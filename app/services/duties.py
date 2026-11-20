@@ -1,14 +1,13 @@
-"""Recurring board and management duties, and the reminder emails sent to their owners.
+"""Recurring board and management duties: the calendar the weekly review reads.
 
 Duties come in from the page, from a CSV with one duty per row, or from a month-grid
 calendar (Excel or CSV): months across the top, days of the month down the side, and a
 task in each cell that's due that day every year. See `parse_upload`.
 
 A duty has a first due date and a repeat rule (none, weekly, monthly, quarterly, twice
-a year or yearly). Its owners are email addresses and/or roles. Reminders go out a set
-number of days before each due date (by default 7 days before and on the day), from the
-same hourly job that delivers email. A `duty_reminders` row is written in the same
-transaction as each email, and its unique key means a reminder never goes out twice.
+a year or yearly), and may be a hard deadline. Owners are optional: a hint (email
+addresses and/or roles) for the weekly review in app/services/weekly_review.py, which
+decides who needs to act and emails them.
 """
 
 from __future__ import annotations
@@ -24,12 +23,9 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 
 from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from app.config import get_settings
-from app.email.outbox import enqueue
-from app.models import Duty, DutyReminder, User
+from app.models import Duty, User
 from app.permissions import Role
 from app.services.reservations import tz
 
@@ -62,14 +58,15 @@ OWNER_ROLES = {
     "board": Role.BOARD,
     "management": Role.MANAGEMENT,
 }
-DEFAULT_REMIND_DAYS = [7, 0]
-MAX_LEAD_DAYS = 365
 MAX_ROWS = 500
 MAX_CSV_BYTES = 200_000
 MAX_XLSX_BYTES = 2_000_000
 MAX_XLSX_UNZIPPED_BYTES = 30_000_000
-HARD_DEADLINE_REMIND_DAYS = [14, 7, 0]
-CSV_COLUMNS = ["title", "details", "owners", "first_due", "repeat", "remind_days"]
+CSV_COLUMNS = ["title", "details", "owners", "first_due", "repeat", "hard_deadline"]
+# Accepted in an upload and ignored: files made for the earlier fixed reminders.
+IGNORED_COLUMNS = ["remind_days"]
+YES = {"yes", "y", "true", "1", "x", "hard"}
+NO = {"", "no", "n", "false", "0"}
 _EMAIL = re.compile(r"^[^@\s,;<>\"]+@[^@\s,;<>\"]+\.[^@\s,;<>\"]+$")
 
 
@@ -89,7 +86,7 @@ class DutyFields:
     owners: list[str] = field(default_factory=list)
     first_due: date | None = None
     repeat: str = "none"
-    remind_days: list[int] = field(default_factory=lambda: list(DEFAULT_REMIND_DAYS))
+    hard_deadline: bool = False
     # From a month-grid calendar, which has no owners or details: on a re-upload the
     # duty keeps the owners and details set on the Duties page.
     from_grid: bool = False
@@ -109,8 +106,6 @@ def parse_owners(value: str) -> list[str]:
             raise ValueError(f'"{token}" isn\'t an email address or one of: board, management')
         if t not in owners:
             owners.append(t)
-    if not owners:
-        raise ValueError("add at least one owner (an email address, board or management)")
     return owners
 
 
@@ -132,21 +127,17 @@ def parse_repeat(value: str) -> str:
     return v
 
 
-def parse_remind_days(value: str) -> list[int]:
-    if not value.strip():
-        return list(DEFAULT_REMIND_DAYS)
-    days: set[int] = set()
-    for token in re.split(r"[;,\s]+", value.strip()):
-        if not token:
-            continue
-        if not token.isdigit() or int(token) > MAX_LEAD_DAYS:
-            raise ValueError(f'"{token}" isn\'t a number of days from 0 to {MAX_LEAD_DAYS}')
-        days.add(int(token))
-    return sorted(days, reverse=True)
+def parse_hard(value: str) -> bool:
+    v = value.strip().lower()
+    if v in YES:
+        return True
+    if v in NO:
+        return False
+    raise ValueError(f'"{value}" isn\'t yes or no')
 
 
 def parse_fields(
-    *, title: str, details: str, owners: str, first_due: str, repeat: str, remind_days: str
+    *, title: str, details: str, owners: str, first_due: str, repeat: str, hard_deadline: str
 ) -> DutyFields:
     """Validate one duty. Raises ValueError with a message for people."""
     title = " ".join(title.split())[:200]
@@ -158,7 +149,7 @@ def parse_fields(
         owners=parse_owners(owners),
         first_due=parse_date(first_due),
         repeat=parse_repeat(repeat),
-        remind_days=parse_remind_days(remind_days),
+        hard_deadline=parse_hard(hard_deadline),
     )
 
 
@@ -182,13 +173,13 @@ def parse_csv(data: bytes) -> list[DutyFields]:
 def _parse_rows(text: str) -> list[DutyFields]:
     reader = csv.DictReader(io.StringIO(text))
     header = [(h or "").strip().lower().replace(" ", "_") for h in (reader.fieldnames or [])]
-    missing = [c for c in ("title", "owners", "first_due") if c not in header]
+    missing = [c for c in ("title", "first_due") if c not in header]
     if missing:
         raise DutyError(
             "The first row needs the column names: " + ", ".join(CSV_COLUMNS) + ". "
             f"Missing: {', '.join(missing)}."
         )
-    unknown = [h for h in header if h and h not in CSV_COLUMNS]
+    unknown = [h for h in header if h and h not in CSV_COLUMNS + IGNORED_COLUMNS]
     if unknown:
         raise DutyError(f"Unknown columns: {', '.join(unknown)}. Use: {', '.join(CSV_COLUMNS)}.")
     reader.fieldnames = header
@@ -282,8 +273,8 @@ def default_owner(title: str) -> str:
 def parse_grid(grid: list[list[Cell]], *, year: int) -> Parsed:
     """A month-grid calendar: every task repeats yearly on its month and day.
 
-    Owners default to the board, or to management for tasks that start "Mgt. Co". Hard
-    deadlines (orange in Excel, or "!" in a CSV) get an extra reminder 14 days ahead. A
+    Owners start as the board, or management for tasks that start "Mgt. Co" (a hint for
+    the weekly review). Hard deadlines are orange in Excel, or marked "!" in a CSV. A
     day the month doesn't have (April 31) moves to the month's last day, with a warning.
     """
     found = _find_header(grid)
@@ -341,7 +332,7 @@ def parse_grid(grid: list[list[Cell]], *, year: int) -> Parsed:
                 owners=[default_owner(title)],
                 first_due=due,
                 repeat="yearly",
-                remind_days=list(HARD_DEADLINE_REMIND_DAYS if hard else DEFAULT_REMIND_DAYS),
+                hard_deadline=hard,
                 from_grid=True,
             )
         )
@@ -429,7 +420,7 @@ def _apply(duty: Duty, f: DutyFields, *, keep_owners: bool = False) -> None:
         duty.owners = list(f.owners)
     duty.first_due = f.first_due
     duty.repeat = f.repeat
-    duty.remind_days = list(f.remind_days)
+    duty.hard_deadline = f.hard_deadline
 
 
 def import_rows(db: Session, rows: list[DutyFields], *, by: User) -> tuple[int, int]:
@@ -449,8 +440,8 @@ def import_rows(db: Session, rows: list[DutyFields], *, by: User) -> tuple[int, 
             added += 1
         else:
             updated += 1
-        # A calendar has no owners: it sets the date and reminders, and the owners and
-        # details set on the Duties page stay.
+        # A calendar has no owners: it sets the date and hard deadline, and the owners
+        # and details set on the Duties page stay.
         _apply(duty, f, keep_owners=f.from_grid and not is_new)
     return added, updated
 
@@ -483,30 +474,23 @@ def to_csv(duties: list[Duty]) -> str:
                 "; ".join(d.owners),
                 d.first_due.isoformat(),
                 d.repeat,
-                "; ".join(str(n) for n in d.remind_days),
+                "yes" if d.hard_deadline else "",
             ]
         )
     return out.getvalue()
 
 
 TEMPLATE_ROWS = [
-    ["Review the monthly financial statements", "", "board", "2027-01-15", "monthly", "7; 0"],
+    ["Review the monthly financial statements", "", "board", "2027-01-15", "monthly", ""],
     [
         "Renew the master insurance policy",
         "Get two quotes first.",
         "management",
         "2027-06-01",
         "yearly",
-        "60; 14; 0",
+        "yes",
     ],
-    [
-        "File the annual corporate report",
-        "",
-        "treasurer@example.org; board",
-        "2027-03-31",
-        "yearly",
-        "30; 7",
-    ],
+    ["File the annual corporate report", "", "", "2027-03-31", "yearly", "yes"],
 ]
 
 
@@ -574,86 +558,3 @@ def upcoming(db: Session, today: date, days: int = 90) -> list[Upcoming]:
         Upcoming(d, due) for d in db.scalars(select(Duty)) for due in occurrences(d, today, end)
     ]
     return sorted(items, key=lambda u: (u.due, u.duty.title.lower()))
-
-
-# --- Reminders --------------------------------------------------------------------
-
-
-def recipients(db: Session, duty: Duty) -> list[str]:
-    emails: set[str] = set()
-    roles = [o for o in duty.owners if "@" not in o]
-    emails.update(o for o in duty.owners if "@" in o)
-    if roles:
-        users = db.scalars(select(User).where(User.role.in_(roles), User.is_active.is_(True)))
-        emails.update(u.email for u in users)
-    return sorted(emails)
-
-
-def due_reminders(duty: Duty, today: date) -> list[tuple[date, int]]:
-    """(due date, lead days) of the reminders that should have gone out by `today`.
-
-    For each coming due date, the reminder is the latest one whose day has arrived. If
-    the job didn't run on a reminder's day it goes out late rather than not at all, and
-    a reminder that a later one has replaced is skipped.
-    """
-    leads = sorted(set(duty.remind_days or DEFAULT_REMIND_DAYS))
-    out = []
-    for due in occurrences(duty, today, today + timedelta(days=max(leads))):
-        days_left = (due - today).days
-        lead = next((n for n in leads if n >= days_left), None)
-        if lead is not None:
-            out.append((due, lead))
-    return out
-
-
-def _subject(duty: Duty, due: date, today: date) -> str:
-    days = (due - today).days
-    when = "today" if days == 0 else "tomorrow" if days == 1 else f"in {days} days"
-    return f"Reminder: {duty.title} is due {when}"
-
-
-def send_reminders(db: Session, *, now: datetime | None = None) -> int:
-    """Queue reminder emails that are due. Safe to run any number of times."""
-    s = get_settings()
-    now = (now or datetime.now(tz())).astimezone(tz())
-    if now.hour < s.duty_reminder_hour:
-        return 0
-    today = now.date()
-    sent = 0
-    for duty in list(db.scalars(select(Duty).order_by(Duty.id))):
-        for due, lead in due_reminders(duty, today):
-            done = db.scalar(
-                select(DutyReminder.id).where(
-                    DutyReminder.duty_id == duty.id,
-                    DutyReminder.due_on == due,
-                    DutyReminder.lead_days == lead,
-                )
-            )
-            if done:
-                continue
-            to = recipients(db, duty)
-            if not to:
-                log.warning("duty %s has no one to remind", duty.id)
-                continue
-            try:
-                with db.begin_nested():
-                    db.add(DutyReminder(duty_id=duty.id, due_on=due, lead_days=lead))
-                    db.flush()
-                    enqueue(
-                        db,
-                        to=", ".join(to),
-                        subject=_subject(duty, due, today),
-                        template="duty_reminder",
-                        kind="duty",
-                        title=duty.title,
-                        details=duty.details,
-                        due=f"{due:%A, %B} {due.day}, {due.year}",
-                        when=_subject(duty, due, today).split(" is due ", 1)[1],
-                        repeat=duty.repeat,
-                        link=f"{s.base_url.rstrip('/')}/duties",
-                    )
-            except IntegrityError:
-                continue  # another worker sent it first
-            sent += 1
-    db.commit()
-    return sent

@@ -1,0 +1,12 @@
+{% if name %}Hi {{ name }},
+
+{% endif %}Here's what needs you over the next few weeks.
+{% for i in items %}
+
+{{ loop.index }}. {{ i.title }}{% if i.due %} (due {{ i.due }}{% if i.hard %}, hard deadline{% endif %}){% endif %}
+   {{ i.action }}
+{% if i.why %}   Why you: {{ i.why }}
+{% endif %}{% for d in i.documents %}   From: {{ d.title }} {{ d.link }}
+{% endfor %}{% endfor %}
+
+This review goes out on {{ weekday }}s, and only when something needs you. See the duty calendar: {{ link }}

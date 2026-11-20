@@ -52,7 +52,10 @@ class Perm(StrEnum):
     BLASTS_SEND = "blasts.send"
     ASK_MANAGEMENT = "management.ask"  # email a question to the management company
     AUDIT_VIEW = "audit.view"
-    DUTIES_MANAGE = "duties.manage"  # the calendar of recurring duties and its reminders
+    DUTIES_MANAGE = "duties.manage"  # the calendar of recurring duties
+    # See what the weekly review would send and what it sent (admins only: it shows
+    # board-only and management-only material side by side).
+    WEEKLY_REVIEW = "weekly_review.view"
     RESERVATIONS_BOOK = "reservations.book"
     # Approve and decline requests, cancel anyone's booking, block time, see who booked.
     RESERVATIONS_MANAGE = "reservations.manage"
