@@ -111,7 +111,14 @@ class SESProvider:
             res = self.client.send_email(**kwargs)
         except ClientError as exc:
             code = exc.response["Error"].get("Code", "")
-            permanent = code in {"MessageRejected", "MailFromDomainNotVerifiedException"}
+            # AccessDenied won't fix itself on a retry (e.g. a recipient that isn't
+            # verified while the account is in the SES sandbox), so show it at once.
+            permanent = code in {
+                "MessageRejected",
+                "MailFromDomainNotVerifiedException",
+                "AccessDenied",
+                "AccessDeniedException",
+            }
             raise EmailSendError(f"SES error: {code}", permanent=permanent) from exc
         return res.get("MessageId", "")
 

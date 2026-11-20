@@ -12,7 +12,8 @@ from app.db import Base
 config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
+# configparser treats "%" as interpolation; a URL-encoded password (p%40ss) must survive.
+config.set_main_option("sqlalchemy.url", get_settings().database_url.replace("%", "%%"))
 target_metadata = Base.metadata
 
 

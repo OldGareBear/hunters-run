@@ -80,7 +80,14 @@ class AnthropicLLM:
 
         s = get_settings()
         self.settings = s
-        self.client = anthropic.Anthropic(api_key=s.anthropic_api_key or None, max_retries=3)
+        # API Gateway gives up on a request after 29 seconds, so a slow or overloaded API
+        # must fail inside that and show ERROR_ANSWER: two tries of at most ~13 s each.
+        # The read timeout is per streamed chunk, not for the whole answer.
+        self.client = anthropic.Anthropic(
+            api_key=s.anthropic_api_key or None,
+            timeout=anthropic.Timeout(10.0, connect=3.0),
+            max_retries=1,
+        )
 
     def answer(self, *, question: str, history: list[dict], sources: list[Source]) -> Answer:
         import anthropic
@@ -100,9 +107,14 @@ class AnthropicLLM:
             "messages": messages,
             "output_config": {"effort": s.anthropic_effort},
         }
+        info = s.model_info
         if not s.anthropic_thinking:
-            kwargs["thinking"] = {"type": "disabled"}
-        if s.anthropic_fallbacks:
+            # Each model family turns thinking off its own way (Opus 5.5 can't at all);
+            # the wrong value is a 400 on every question. Unknown models get "disabled".
+            off = info.thinking_off if info else "disabled"
+            if off:
+                kwargs["thinking"] = {"type": off}
+        if s.anthropic_fallbacks and (info is None or info.fallbacks):
             kwargs["betas"] = ["server-side-fallback-2026-07-01"]
             kwargs["fallbacks"] = "default"
         try:

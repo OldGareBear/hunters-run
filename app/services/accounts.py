@@ -112,6 +112,15 @@ def accept_invite(db: Session, invite: Invite, *, full_name: str, password: str)
 def is_locked_out(db: Session, email: str) -> bool:
     s = get_settings()
     since = utcnow() - timedelta(minutes=s.login_lockout_minutes)
+    # Failures before the person last reset (or changed) their password don't count, so
+    # someone locked out by a stranger guessing at their address can always get back in.
+    user = get_user_by_email(db, email)
+    if user is not None:
+        reset_at = db.scalar(
+            select(func.max(PasswordReset.used_at)).where(PasswordReset.user_id == user.id)
+        )
+        if reset_at is not None:
+            since = max(since, as_utc(reset_at))
     failures = db.scalar(
         select(func.count())
         .select_from(LoginAttempt)
@@ -143,6 +152,8 @@ def authenticate(db: Session, email: str, password: str, ip: str) -> User | None
 
 # --- Password reset ---------------------------------------------------------------
 
+RESETS_PER_HOUR = 3  # reset emails per person; more requests are dropped silently
+
 
 def request_password_reset(db: Session, email: str) -> None:
     """Always behaves the same whether or not the account exists."""
@@ -152,6 +163,14 @@ def request_password_reset(db: Session, email: str) -> None:
         return
     user = get_user_by_email(db, email)
     if user is None or not user.is_active:
+        return
+    recent = db.scalar(
+        select(func.count(PasswordReset.id)).where(
+            PasswordReset.user_id == user.id,
+            PasswordReset.created_at >= utcnow() - timedelta(hours=1),
+        )
+    )
+    if (recent or 0) >= RESETS_PER_HOUR:  # anyone can ask; don't let them flood a mailbox
         return
     token = new_token()
     s = get_settings()
@@ -186,14 +205,18 @@ def complete_reset(db: Session, reset: PasswordReset, password: str) -> User:
         raise AccountError("This account is no longer active.")
     user.password_hash = hash_password(password)
     reset.used_at = utcnow()
-    # Invalidate every other outstanding reset link for this user.
+    void_resets(db, user)  # every other outstanding link
+    return user
+
+
+def void_resets(db: Session, user: User) -> None:
+    """End every outstanding reset link for this person (their password just changed)."""
     for other in db.scalars(
         select(PasswordReset).where(
             PasswordReset.user_id == user.id, PasswordReset.used_at.is_(None)
         )
     ):
         other.used_at = utcnow()
-    return user
 
 
 def active_admin_count(db: Session) -> int:

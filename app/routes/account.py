@@ -9,6 +9,7 @@ from app.db import get_db
 from app.models import User, UserSession
 from app.security.auth import require_user
 from app.security.passwords import hash_password, password_problems, verify_password
+from app.services import accounts
 from app.web import redirect, render
 
 router = APIRouter(prefix="/account")
@@ -54,6 +55,7 @@ def change_password(
     if problems:
         return render(request, "account/account.html", 400, errors=problems)
     user.password_hash = hash_password(new)
+    accounts.void_resets(db, user)  # a reset link sent earlier no longer works
     # Sign out every other device.
     current_sess = request.state.session_obj
     for sess in db.scalars(select(UserSession).where(UserSession.user_id == user.id)):

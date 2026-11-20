@@ -41,6 +41,8 @@ locals {
     EMBEDDING_PROVIDER            = "hashing"
     LLM_PROVIDER                  = "anthropic"
     ANTHROPIC_MODEL               = var.anthropic_model
+    CHAT_PRICE_INPUT_PER_MTOK     = var.chat_price_input_per_mtok
+    CHAT_PRICE_OUTPUT_PER_MTOK    = var.chat_price_output_per_mtok
     CHAT_DAILY_LIMIT_PER_USER     = tostring(var.chat_daily_limit_per_user)
     CHAT_MONTHLY_BUDGET_USD       = tostring(var.chat_monthly_budget_usd)
     EMAIL_PROVIDER                = "ses"
@@ -83,9 +85,11 @@ resource "aws_iam_role_policy" "lambda" {
         Resource = data.aws_secretsmanager_secret.app.arn
       },
       {
+        # Every identity in this account and region, not just the sending domain: in the
+        # SES sandbox, SES also checks the (verified) recipient's identity against this.
         Effect   = "Allow"
         Action   = ["ses:SendEmail", "ses:SendRawEmail"]
-        Resource = "arn:aws:ses:${local.region}:${local.account}:identity/${var.email_domain}"
+        Resource = "arn:aws:ses:${local.region}:${local.account}:identity/*"
       },
       {
         # The web function hands email and Dropbox syncs to the tasks function.

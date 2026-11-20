@@ -17,7 +17,7 @@ from sqlalchemy import delete
 from app.config import get_settings
 from app.db import session_factory, utcnow
 from app.email.outbox import deliver_pending
-from app.models import LoginAttempt, PasswordReset, UserSession
+from app.models import EmailMessage, LoginAttempt, PasswordReset, UserSession
 
 log = logging.getLogger("app.worker")
 _stop = False
@@ -33,6 +33,14 @@ def prune(db) -> None:
     db.execute(delete(UserSession).where(UserSession.expires_at < now))
     db.execute(delete(PasswordReset).where(PasswordReset.expires_at < now - timedelta(days=1)))
     db.execute(delete(LoginAttempt).where(LoginAttempt.created_at < now - timedelta(days=30)))
+    # Delivered email after 30 days. Announcements' messages stay: their page counts them.
+    db.execute(
+        delete(EmailMessage).where(
+            EmailMessage.status == "sent",
+            EmailMessage.blast_id.is_(None),
+            EmailMessage.sent_at < now - timedelta(days=30),
+        )
+    )
     db.commit()
 
 

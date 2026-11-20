@@ -1,6 +1,16 @@
+from datetime import UTC, datetime, timedelta
+
 from sqlalchemy import select
 
-from app.models import AuditLog, Invite, User, UserSession
+from app.models import (
+    AuditLog,
+    EmailBlast,
+    EmailMessage,
+    Invite,
+    PasswordReset,
+    User,
+    UserSession,
+)
 from app.permissions import Role
 from tests.conftest import PASSWORD, link_from
 
@@ -160,3 +170,93 @@ def test_last_admin_cannot_be_demoted(client_for, make_user, db):
     # and admins can't change themselves.
     resp = admin.post_form(f"/admin/users/{admin.user.id}/role", {"role": "board"})
     assert resp.status_code == 400
+
+
+def test_reset_emails_are_limited_per_hour(client, make_user, outbox, db):
+    make_user(Role.HOMEOWNER, "owner@example.com")
+    for _ in range(5):
+        assert client.post_form("/forgot", {"email": "owner@example.com"}).status_code == 200
+    assert len([m for m in outbox if "Reset" in m.subject]) == 3
+    for r in db.scalars(select(PasswordReset)):  # an hour later it works again
+        r.created_at = r.created_at - timedelta(hours=1, minutes=1)
+    db.commit()
+    client.post_form("/forgot", {"email": "owner@example.com"})
+    assert len([m for m in outbox if "Reset" in m.subject]) == 4
+
+
+def test_a_completed_reset_ends_a_lockout(client, make_user, outbox):
+    make_user(Role.HOMEOWNER, "owner@example.com")
+    for _ in range(5):  # someone else guessing at the address
+        client.post_form("/login", {"email": "owner@example.com", "password": "wrong"})
+    assert (
+        client.post_form("/login", {"email": "owner@example.com", "password": PASSWORD}).status_code
+        == 429
+    )
+    client.post_form("/forgot", {"email": "owner@example.com"})
+    path = link_from(outbox[-1].text)
+    new_password = "a brand new passphrase"
+    client.post_form(path, {"password": new_password, "password_confirm": new_password})
+    client.login("owner@example.com", new_password)
+
+
+def test_changing_the_password_ends_reset_links(client_for, outbox):
+    c = client_for(Role.HOMEOWNER, "owner@example.com")
+    c.post_form("/forgot", {"email": "owner@example.com"})
+    path = link_from(outbox[-1].text)
+    assert c.get(path).status_code == 200
+    new = "another long passphrase"
+    resp = c.post_form("/account/password", {"current": PASSWORD, "new": new, "confirm": new})
+    assert resp.status_code == 303
+    assert c.get(path).status_code == 404
+
+
+def test_sign_in_links_are_not_kept_in_the_outbox(client, client_for, make_user, outbox, db):
+    make_user(Role.HOMEOWNER, "owner@example.com")
+    client.post_form("/forgot", {"email": "owner@example.com"})
+    admin = client_for(Role.ADMIN, "admin@example.com")
+    admin.post_form("/admin/invites", {"email": "new@example.com", "role": "homeowner"})
+    assert {m.to for m in outbox} >= {"owner@example.com", "new@example.com"}  # delivered
+    stored = db.scalars(select(EmailMessage).where(EmailMessage.kind.in_(("reset", "invite"))))
+    stored = list(stored)
+    assert {m.kind for m in stored} == {"reset", "invite"}
+    assert all(m.status == "sent" and m.text_body == m.html_body == "" for m in stored)
+
+
+def test_prune_drops_old_delivered_email(db):
+    from app.worker import prune
+
+    old = datetime.now(UTC) - timedelta(days=31)
+    blast = EmailBlast(subject="s", body="b", audience_roles=["homeowner"], status="queued")
+    db.add(blast)
+    db.flush()
+    for kind, status, blast_id in [
+        ("ticket", "sent", None),
+        ("ticket", "failed", None),
+        ("blast", "sent", blast.id),
+    ]:
+        db.add(
+            EmailMessage(
+                to_email="x@example.com",
+                subject=kind,
+                text_body="x",
+                kind=kind,
+                status=status,
+                blast_id=blast_id,
+                created_at=old,
+                sent_at=old if status == "sent" else None,
+            )
+        )
+    db.add(
+        EmailMessage(
+            to_email="y@example.com",
+            subject="new",
+            text_body="x",
+            kind="ticket",
+            status="sent",
+            sent_at=datetime.now(UTC),
+        )
+    )
+    db.commit()
+    prune(db)
+    left = sorted((m.subject, m.status) for m in db.scalars(select(EmailMessage)))
+    assert left == [("blast", "sent"), ("new", "sent"), ("ticket", "failed")]

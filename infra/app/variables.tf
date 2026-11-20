@@ -54,8 +54,21 @@ variable "worker_schedule" {
 }
 
 variable "anthropic_model" {
-  type    = string
-  default = "claude-haiku-5-5"
+  description = "The portal knows claude-haiku-5-5, claude-sonnet-5-5 and claude-opus-5-5. For any other model, also set both chat_price variables."
+  type        = string
+  default     = "claude-haiku-5-5"
+}
+
+variable "chat_price_input_per_mtok" {
+  description = "USD per million input tokens, for the budget. Leave empty for a model the portal knows."
+  type        = string
+  default     = ""
+}
+
+variable "chat_price_output_per_mtok" {
+  description = "USD per million output tokens, for the budget. Leave empty for a model the portal knows."
+  type        = string
+  default     = ""
 }
 
 variable "chat_daily_limit_per_user" {

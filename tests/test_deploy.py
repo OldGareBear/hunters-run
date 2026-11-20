@@ -286,6 +286,8 @@ def test_lambda_environment_passes_production_checks(monkeypatch):
         CHAT_DAILY_LIMIT_PER_USER="20",
         CHAT_MONTHLY_BUDGET_USD="5",
         ANTHROPIC_MODEL="claude-haiku-5-5",
+        CHAT_PRICE_INPUT_PER_MTOK="",  # empty: the known model's prices
+        CHAT_PRICE_OUTPUT_PER_MTOK="",
         AWS_SECRETS_MANAGER_SECRET_ID="",
         # what DEPLOY.md puts in the secret
         SECRET_KEY="x" * 48,
@@ -300,3 +302,45 @@ def test_lambda_environment_passes_production_checks(monkeypatch):
         monkeypatch.setenv(k, v)
     s = Settings()
     assert s.is_production and s.retrieval == "keyword" and s.database_null_pool
+    assert (s.chat_price_input_per_mtok, s.chat_price_output_per_mtok) == (0.10, 0.50)
+
+
+# --- email on AWS --------------------------------------------------------------
+def test_ses_access_denied_is_permanent():
+    from botocore.exceptions import ClientError
+
+    from app.email.providers import EmailSendError, OutgoingEmail, SESProvider
+
+    class Client:
+        def send_email(self, **_):
+            error = {"Error": {"Code": "AccessDeniedException", "Message": "identity/x"}}
+            raise ClientError(error, "SendEmail")
+
+    provider = SESProvider.__new__(SESProvider)
+    provider.s, provider.client = get_settings(), Client()
+    with pytest.raises(EmailSendError) as exc:
+        provider.send(OutgoingEmail(to="a@example.com", subject="s", text="t"))
+    assert exc.value.permanent  # shown in last_error now, not retried for hours
+
+
+def test_lambda_may_send_to_sandbox_recipients():
+    from pathlib import Path
+
+    tf = (Path(__file__).parents[1] / "infra/app/main.tf").read_text()
+    ses = tf.split('"ses:SendRawEmail"]', 1)[1].split("\n", 2)[1]
+    assert ses.strip().endswith(':identity/*"')
+
+
+def test_migrations_accept_a_url_encoded_password(monkeypatch, capsys):
+    from pathlib import Path
+
+    from alembic import command
+    from alembic.config import Config
+
+    url = "postgresql+psycopg://neondb_owner:p%40ss@db.example/neondb?sslmode=require"
+    monkeypatch.setattr(get_settings(), "database_url", url)
+    root = Path(__file__).parents[1]
+    cfg = Config()  # no ini file, so the test's logging setup is left alone
+    cfg.set_main_option("script_location", str(root / "migrations"))
+    command.upgrade(cfg, "head", sql=True)  # offline: prints the SQL, connects to nothing
+    assert "CREATE TABLE users" in capsys.readouterr().out

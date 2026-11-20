@@ -196,6 +196,36 @@ def test_anthropic_request_shape_and_citation_parsing():
     assert content[-1] == {"type": "text", "text": "When?"}
 
 
+@pytest.mark.parametrize(
+    "model,thinking,fallbacks",
+    [
+        ("claude-haiku-5-5", {"type": "disabled"}, False),
+        ("claude-sonnet-5-5", {"type": "between_tools"}, True),  # "disabled" is a 400 there
+        ("claude-opus-5-5", None, True),  # thinking can't be turned off; effort controls it
+    ],
+)
+def test_thinking_and_fallback_per_model(monkeypatch, model, thinking, fallbacks):
+    from app.config import get_settings
+
+    s = get_settings()
+    monkeypatch.setattr(s, "anthropic_model", model)
+    monkeypatch.setattr(s, "anthropic_fallbacks", True)
+    message = SimpleNamespace(stop_reason="end_turn", model=model, usage=None, content=[])
+    client, captured = _fake_anthropic(message)
+    _llm_with(client).answer(question="When?", history=[], sources=SOURCES)
+    assert captured.get("thinking") == thinking
+    assert ("fallbacks" in captured) is fallbacks
+
+
+def test_anthropic_client_fails_inside_the_request_time_limit(monkeypatch):
+    from app.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "anthropic_api_key", "sk-placeholder")
+    client = AnthropicLLM().client
+    assert client.max_retries == 1
+    assert (client.timeout.read, client.timeout.connect) == (10.0, 3.0)
+
+
 def test_anthropic_refusal_is_reported():
     message = SimpleNamespace(stop_reason="refusal", model="m", content=[])
     client, _ = _fake_anthropic(message)

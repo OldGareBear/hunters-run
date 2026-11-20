@@ -59,6 +59,16 @@ def enqueue(
     return msg
 
 
+# These carry a working sign-in link. The tokens are stored only as hashes elsewhere,
+# so once the message has gone (or will never go) its body isn't kept either.
+SECRET_KINDS = ("invite", "reset")
+
+
+def _forget_body(m: EmailMessage) -> None:
+    if m.kind in SECRET_KINDS and m.status in ("sent", "failed"):
+        m.text_body = m.html_body = ""
+
+
 def _backoff(attempts: int) -> timedelta:
     return timedelta(minutes=min(2 ** (attempts - 1), 60))
 
@@ -127,5 +137,6 @@ def deliver_pending(db: Session, *, limit: int = 200) -> int:
             m.status = "pending" if m.attempts < s.email_max_attempts else "failed"
             m.next_attempt_at = utcnow() + _backoff(m.attempts)
             log.exception("email %s failed unexpectedly", m.id)
+        _forget_body(m)
         db.commit()
     return sent

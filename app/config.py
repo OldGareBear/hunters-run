@@ -10,11 +10,12 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic.fields import FieldInfo
 from pydantic_settings import (
     BaseSettings,
@@ -28,6 +29,26 @@ DEV_SECRET = "dev-insecure-secret-change-me"  # noqa: S105
 
 
 SECRETS_ID_ENV = "AWS_SECRETS_MANAGER_SECRET_ID"
+
+
+@dataclass(frozen=True)
+class ModelInfo:
+    """What the portal needs to know about a Claude model to call it and count its cost."""
+
+    input_per_mtok: float  # USD per million tokens
+    output_per_mtok: float
+    # The `thinking` type that turns extended thinking off, or None where it can't be
+    # (effort is then the only control). Each of these 400s on the other models.
+    thinking_off: str | None
+    fallbacks: bool  # server-side refusal fallback (`fallbacks: "default"`)
+
+
+MODELS = {
+    # Haiku's price is for prompts up to 100K tokens; the portal's are about 6K.
+    "claude-haiku-5-5": ModelInfo(0.10, 0.50, "disabled", fallbacks=False),
+    "claude-sonnet-5-5": ModelInfo(2.0, 10.0, "between_tools", fallbacks=True),
+    "claude-opus-5-5": ModelInfo(4.0, 20.0, None, fallbacks=True),
+}
 
 
 def _secret(**kw) -> Any:
@@ -79,7 +100,9 @@ class SecretsManagerSource(PydanticBaseSettingsSource):
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # hide_input_in_errors: a bad setting must not print the others (secrets included)
+    # into the logs.
+    model_config = SettingsConfigDict(env_file=".env", extra="ignore", hide_input_in_errors=True)
 
     @classmethod
     def settings_customise_sources(
@@ -189,10 +212,10 @@ class Settings(BaseSettings):
     # assistant pauses until the 1st and points people to management. 0 = no limit.
     chat_daily_limit_per_user: int = 20
     chat_monthly_budget_usd: float = 5.0
-    # Prices used for the estimate, in USD per million tokens. Defaults match
-    # claude-haiku-5-5; update them if you change ANTHROPIC_MODEL.
-    chat_price_input_per_mtok: float = 0.10
-    chat_price_output_per_mtok: float = 0.50
+    # Prices used for the estimate, in USD per million tokens. Leave them unset for a
+    # model in MODELS above and its prices are used; set both for any other model.
+    chat_price_input_per_mtok: float | None = None
+    chat_price_output_per_mtok: float | None = None
     rag_top_k: int = 8
     rag_min_score: float = 0.15
     rag_history_turns: int = 6
@@ -249,6 +272,48 @@ class Settings(BaseSettings):
     def management_notify_list(self) -> list[str]:
         return [e.strip() for e in self.management_notify_emails.split(",") if e.strip()]
 
+    @property
+    def model_info(self) -> ModelInfo | None:
+        return MODELS.get(self.anthropic_model)
+
+    @field_validator("chat_price_input_per_mtok", "chat_price_output_per_mtok", mode="before")
+    @classmethod
+    def _blank_price(cls, v: Any) -> Any:
+        return None if isinstance(v, str) and not v.strip() else v
+
+    def _check_model(self) -> list[str]:
+        """Fill in the model's prices, and catch settings the API would reject."""
+        info = self.model_info
+        priced = None not in (self.chat_price_input_per_mtok, self.chat_price_output_per_mtok)
+        fallback = max(MODELS.values(), key=lambda m: m.output_per_mtok)  # err on the high side
+        if self.chat_price_input_per_mtok is None:
+            self.chat_price_input_per_mtok = (info or fallback).input_per_mtok
+        if self.chat_price_output_per_mtok is None:
+            self.chat_price_output_per_mtok = (info or fallback).output_per_mtok
+        if self.llm_provider != "anthropic":
+            return []
+        problems = []
+        if info is None:
+            if self.is_production and not priced:
+                problems.append(
+                    f"ANTHROPIC_MODEL {self.anthropic_model!r} isn't one the portal knows the "
+                    "prices of; set CHAT_PRICE_INPUT_PER_MTOK and CHAT_PRICE_OUTPUT_PER_MTOK"
+                )
+            return problems
+        if (
+            not self.anthropic_thinking
+            and info.thinking_off
+            and self.anthropic_effort in ("xhigh", "max")
+        ):
+            problems.append(
+                f"{self.anthropic_model} can't turn thinking off at effort "
+                f"{self.anthropic_effort}; use ANTHROPIC_EFFORT=high or lower, or "
+                "ANTHROPIC_THINKING=true"
+            )
+        if self.anthropic_fallbacks and not info.fallbacks:
+            problems.append(f"{self.anthropic_model} has no server-side fallback")
+        return problems
+
     @model_validator(mode="after")
     def _check_production(self) -> Settings:
         _parse_folder_roles(self.dropbox_folder_roles)  # fail fast on a bad mapping
@@ -257,9 +322,12 @@ class Settings(BaseSettings):
             ZoneInfo(self.hoa_timezone)
         except (ZoneInfoNotFoundError, ValueError) as exc:
             raise ValueError(f"HOA_TIMEZONE {self.hoa_timezone!r} isn't a known time zone") from exc
+        model_problems = self._check_model()
         if self.app_env != "production":
+            if model_problems:
+                raise ValueError("Bad model settings: " + "; ".join(model_problems))
             return self
-        problems = []
+        problems = model_problems
         uploads = self.document_source == "upload"
         if self.secret_key == DEV_SECRET or len(self.secret_key) < 32:
             problems.append("SECRET_KEY must be set to a random value of 32+ characters")
