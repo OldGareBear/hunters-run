@@ -1,11 +1,12 @@
 # HOA portal
 
-A private, invite-only website for a homeowners association. It has five parts:
+A private, invite-only website for a homeowners association. It has six parts:
 
 - **Document library.** The board keeps documents in a Dropbox folder. The portal picks them up automatically, and the subfolder a file is in decides who can see it.
 - **Chatbot.** It answers questions from the documents the person asking is allowed to read, and cites its sources.
 - **Email announcements.** The board can send them to homeowners, with a preview and an audit trail.
 - **Asking management.** When the chatbot can't help, a homeowner can send the question to management. It goes as an email with the homeowner copied, so management answers by replying and the conversation carries on by email. The portal keeps no copy.
+- **Duty calendar.** Recurring board and management duties, uploaded as a spreadsheet or added one at a time. Each duty's owners get reminder emails before it's due.
 - **Amenity booking.** Households book the tennis court from a weekly calendar, under limits that keep things fair, and request the clubhouse, which management approves.
 
 Nothing in this repository talks to a paid service unless you configure it. By default it uses an offline chatbot, offline embeddings and console email, so you can run it locally without any API keys.
@@ -26,6 +27,7 @@ People join by invitation only. There is no public sign-up.
 | View the audit log | ✓ | ✓ | | |
 | Book amenities | ✓ | ✓ | | ✓ |
 | Approve requests, cancel any booking, close a space, see who booked | ✓ | | ✓ | |
+| Manage the duty calendar | ✓ | ✓ | ✓ | |
 
 The whole policy lives in `app/permissions.py`. Every route checks it on the server, so hiding a button is never the only protection. If someone opens a document they aren't allowed to see, they get a 404 rather than a 403, so the portal doesn't reveal that the document exists.
 
@@ -71,6 +73,15 @@ With one court, a household can book once a day, so the 2-hour gap only starts t
             "max_per_day": 2, "max_per_week": 4}}
 ```
 
+## Duty calendar
+
+The Duties page (`/duties`) lists recurring duties, such as reviewing the monthly financials or renewing the insurance policy, and what's due in the next 90 days.
+
+- **Upload:** a CSV file with the columns `title`, `details`, `owners`, `first_due`, `repeat` and `remind_days`. The page links to a template and to a download of the current duties, so the spreadsheet can be edited and uploaded again. A row with the same title as an existing duty updates it, and nothing is ever deleted by an upload. If any row has a problem, nothing is saved and the page lists each bad row.
+- **Owners:** email addresses, `board` or `management`, separated by semicolons. A role means every active account with that role at the time the reminder goes out. Homeowners can't be owners, so a duty can never email the whole community.
+- **Repeats:** none, weekly, monthly, quarterly, twice a year or yearly. A monthly duty on the 31st falls on the last day of shorter months.
+- **Reminders:** by default 7 days before and on the day, from 7 AM local time (`DUTY_REMINDER_HOUR`). The hourly background job sends them, one email per reminder with all the owners on it. Each reminder sent is recorded with a unique key, so it never goes out twice, even if the job runs twice at once. If the job misses a day, the reminder goes out late once instead of not at all.
+
 ## Architecture
 
 ```
@@ -86,7 +97,7 @@ FastAPI (server-rendered Jinja pages, tiny progressive-enhancement JS)
  ├─ app/rag          permission-filtered retrieval + Claude with citations | OfflineLLM
  ├─ app/email        transactional outbox → Console | SMTP | SES | Postmark
  ├─ app/amenities.py amenity groups and booking rules (from the AMENITIES setting)
- ├─ app/services     accounts, documents, chat, blasts, escalation, reservations
+ ├─ app/services     accounts, documents, chat, blasts, duties, escalation, reservations
  └─ app/worker.py    delivers queued email with retries, prunes expired sessions
 Postgres + pgvector (HNSW cosine index). SQLite works for local dev and tests.
 ```

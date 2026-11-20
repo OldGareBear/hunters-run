@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Duties{% endblock %}
+{% block content %}
+<div class="head-row"><h1>Duties</h1><a class="button primary" href="/duties/new">Add a duty</a></div>
+{% include "_errors.html" %}
+<p class="muted">Each duty's owners get an email before it's due, by default 7 days before and on the day. Reminders go out from {{ settings().duty_reminder_hour }}:00 local time.</p>
+
+<section class="card">
+  <h2>Coming up in the next 90 days</h2>
+  <table class="table">
+    <thead><tr><th>Due</th><th>Duty</th><th>Owners</th></tr></thead>
+    <tbody>{% for u in upcoming %}
+      <tr><td>{{ u.due.strftime("%a %b") }} {{ u.due.day }}{% if u.due.year != today.year %}, {{ u.due.year }}{% endif %}{% if u.due == today %} <span class="pill">Today</span>{% endif %}</td>
+      <td><a href="/duties/{{ u.duty.id }}">{{ u.duty.title }}</a></td>
+      <td>{% for o in u.duty.owners %}<span class="pill">{{ role_label(o) if "@" not in o else o }}</span> {% endfor %}</td></tr>
+    {% else %}<tr><td colspan="3" class="muted">Nothing due in the next 90 days.</td></tr>{% endfor %}</tbody>
+  </table>
+</section>
+
+<section class="card">
+  <h2>All duties</h2>
+  <table class="table">
+    <thead><tr><th>Duty</th><th>Repeats</th><th>Next due</th><th>Reminders</th><th></th></tr></thead>
+    <tbody>{% for d in duties %}
+      <tr><td><a href="/duties/{{ d.id }}">{{ d.title }}</a></td>
+      <td>{{ d.repeat | capitalize }}</td>
+      <td>{% set nd = next_due[d.id] %}{% if nd %}{{ nd.isoformat() }}{% else %}<span class="muted">Done</span>{% endif %}</td>
+      <td class="small">{% for n in d.remind_days %}{{ "on the day" if n == 0 else n ~ " days before" }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
+      <td><form method="post" action="/duties/{{ d.id }}/delete" class="inline" data-confirm="Delete this duty? Its reminders stop.">{{ csrf_input(request) }}<button class="link danger">Delete</button></form></td></tr>
+    {% else %}<tr><td colspan="5" class="muted">No duties yet. Add one, or upload a spreadsheet below.</td></tr>{% endfor %}</tbody>
+  </table>
+</section>
+
+<section class="card">
+  <h2>Upload a spreadsheet</h2>
+  <p class="muted small">A CSV file with the columns title, details, owners, first_due, repeat and remind_days. Owners are email addresses, board or management, separated by semicolons. Repeat is none, weekly, monthly, quarterly, twice a year or yearly. A duty with the same title as one already here is updated; nothing is deleted. If any row has a problem, nothing is saved. <a href="/duties/template.csv">Download a template</a>{% if duties %} or <a href="/duties/duties.csv">download the current duties</a>{% endif %}.</p>
+  <form method="post" action="/duties/upload" enctype="multipart/form-data">
+    {{ csrf_input(request) }}
+    <label>File <input type="file" name="file" accept=".csv,text/csv" required></label>
+    <button class="primary">Upload</button>
+  </form>
+</section>
+{% endblock %}

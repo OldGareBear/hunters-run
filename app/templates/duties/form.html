@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}{{ "Edit duty" if duty else "Add a duty" }}{% endblock %}
+{% block content %}
+<section class="card">
+  <h1>{{ "Edit duty" if duty else "Add a duty" }}</h1>
+  {% include "_errors.html" %}
+  <form method="post" action="{{ '/duties/%d' % duty.id if duty else '/duties' }}">
+    {{ csrf_input(request) }}
+    <label>Title <input name="title" maxlength="200" value="{{ v.title or '' }}" required></label>
+    <label>Details <textarea name="details" rows="3" maxlength="5000">{{ v.details or '' }}</textarea></label>
+    <label>Owners <input name="owners" value="{{ v.owners or '' }}" placeholder="board; treasurer@example.org" required>
+      <span class="muted small">Email addresses, board or management, separated by semicolons. Everyone listed gets the reminders.</span></label>
+    <div class="row">
+      <label>First due date <input type="date" name="first_due" value="{{ v.first_due or '' }}" required></label>
+      <label>Repeats <select name="repeat">{% for r in repeats %}<option value="{{ r }}" {% if (v.repeat or 'none') == r %}selected{% endif %}>{{ r | capitalize }}</option>{% endfor %}</select></label>
+    </div>
+    <label>Remind this many days before <input name="remind_days" value="{{ v.remind_days or '' }}" placeholder="7; 0">
+      <span class="muted small">Separated by semicolons. 0 means on the day.</span></label>
+    <button class="primary">Save</button> <a href="/duties">Cancel</a>
+  </form>
+</section>
+{% endblock %}
