@@ -1,7 +1,12 @@
+import threading
+
+import pytest
 from sqlalchemy import select
 
-from app.models import AuditLog, EmailBlast, EmailMessage
+from app import db as app_db
+from app.models import AuditLog, EmailBlast, EmailMessage, User
 from app.permissions import Role
+from app.services import blasts as blast_service
 
 
 def _draft(client, roles=("homeowner",), official=False, subject="Pool opens Saturday"):
@@ -92,3 +97,46 @@ def test_body_is_escaped_in_html(client_for, make_user, outbox):
     board.post_form(f"/blasts/{bid}/send", {"confirm_count": "1"})
     assert "<script>" not in outbox[0].html
     assert "&lt;script&gt;" in outbox[0].html
+
+
+def test_bad_confirm_count_is_a_page_not_a_422(client_for, make_user, outbox):
+    board = client_for(Role.BOARD)
+    make_user(Role.HOMEOWNER, "owner0@example.com")
+    bid = _draft(board)
+    resp = board.post_form(f"/blasts/{bid}/send", {"confirm_count": "one"})
+    assert resp.status_code == 303 and not outbox
+
+
+def test_concurrent_sends_queue_once(client_for, make_user, db):
+    if app_db.get_engine().dialect.name != "postgresql":
+        pytest.skip("needs Postgres row locks")
+    for i in range(3):
+        make_user(Role.HOMEOWNER, f"owner{i}@example.com")
+    board = client_for(Role.BOARD, "board@example.com")
+    bid = _draft(board)
+    barrier = threading.Barrier(2)
+    errors = []
+
+    def send():
+        s = app_db.session_factory()()
+        try:
+            blast = s.get(EmailBlast, bid)
+            sender = s.scalar(select(User).where(User.email == "board@example.com"))
+            _ = blast.status
+            barrier.wait()
+            blast_service.queue_blast(s, blast, sender)
+            s.commit()
+        except blast_service.BlastError as exc:
+            errors.append(exc)
+            s.rollback()
+        finally:
+            s.close()
+
+    threads = [threading.Thread(target=send) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    n = len(db.scalars(select(EmailMessage).where(EmailMessage.kind == "blast")).all())
+    assert n == 3
+    assert len(errors) == 1

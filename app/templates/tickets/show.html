@@ -4,7 +4,8 @@
 <section class="card">
   <p class="muted small">Ticket #{{ ticket.id }} · from {{ ticket.created_by.display_name }} · opened {{ ticket.created_at.strftime("%b %-d, %Y") }}
     · <span class="status {{ ticket.status }}">{{ ticket.status.replace("_", " ") | capitalize }}</span>
-    {% if ticket.assigned_to %} · assigned to {{ ticket.assigned_to.display_name }}{% endif %}</p>
+    {% if ticket.assigned_to %} · assigned to {{ ticket.assigned_to.display_name }}{% endif %}
+    {% if ticket.conversation_id and ticket.created_by_id == user.id %} · <a href="/chat/{{ ticket.conversation_id }}">your conversation</a>{% endif %}</p>
   <h1>{{ ticket.subject }}</h1>
   {% if staff %}
   <form method="post" action="/tickets/{{ ticket.id }}/status" class="row small">
@@ -15,15 +16,6 @@
   </form>
   {% endif %}
 </section>
-{% if ticket.conversation %}
-<section class="card">
-  <h2>Conversation with the assistant</h2>
-  <ol class="messages compact">{% for m in ticket.conversation.messages %}
-    <li class="msg {{ m.role }}"><div class="who small">{{ "Question" if m.role == "user" else "Assistant" }}</div><div class="body">{{ m.content | nl2p }}</div>
-    {% if m.citations %}<div class="muted small">Sources: {% for c in m.citations %}[{{ c.n }}] {{ c.title }}{% if c.page %} p.{{ c.page }}{% endif %}{% if not loop.last %}; {% endif %}{% endfor %}</div>{% endif %}</li>
-  {% endfor %}</ol>
-</section>
-{% endif %}
 <section class="card">
   <h2>Messages</h2>
   <ol class="thread">{% for m in messages %}

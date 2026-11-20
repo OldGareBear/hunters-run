@@ -29,6 +29,21 @@ def _ticket_link(ticket: Ticket) -> str:
     return f"{get_settings().base_url.rstrip('/')}/tickets/{ticket.id}"
 
 
+def conversation_questions(conversation: Conversation) -> list[str]:
+    """The asker's own questions, in order: what an escalation copies into the ticket.
+
+    The assistant's answers stay out. They were written from documents the asker can
+    read, which the people handling the ticket may not be allowed to see.
+    """
+    return [m.content for m in conversation.messages if m.role == "user" and m.content.strip()]
+
+
+def questions_block(questions: list[str]) -> str:
+    lines = ["Questions I asked the assistant:"]
+    lines += ["- " + " ".join(q.split()) for q in questions]
+    return "\n".join(lines)
+
+
 def escalate(
     db: Session,
     *,
@@ -50,6 +65,12 @@ def escalate(
     )
     db.add(ticket)
     db.flush()
+    # A copy of the questions, taken now: the conversation can go on or be deleted later,
+    # and the answers in it may quote documents management can't see.
+    questions = conversation_questions(conversation) if conversation else []
+    if questions:
+        body = questions_block(questions)
+        db.add(TicketMessage(ticket_id=ticket.id, author_id=user.id, body=body))
     if details:
         db.add(TicketMessage(ticket_id=ticket.id, author_id=user.id, body=details))
     for email in management_recipients(db):
@@ -65,7 +86,7 @@ def escalate(
             requester_email=user.email,
             details=details,
             link=_ticket_link(ticket),
-            has_conversation=conversation is not None,
+            questions=questions,
         )
     return ticket
 

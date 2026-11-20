@@ -214,7 +214,7 @@ def create(
     background: BackgroundTasks,
     space: str,
     start: str = Form(...),
-    minutes: int = Form(...),
+    minutes: str = Form(...),
     purpose: str = Form(""),
     block: str = Form(""),
     user: User = Depends(require_user),
@@ -225,10 +225,19 @@ def create(
     is_block = block == "1"
     if is_block and not has_perm(user, Perm.RESERVATIONS_MANAGE):
         raise HTTPException(403)
+    length = int(minutes) if minutes.strip().isdigit() else 0
     try:
         when = svc.parse_local(start)
+        if not length:
+            raise svc.ReservationError("Choose how long you'd like to book.")
         r = svc.book(
-            db, user=user, space=space, start=when, minutes=minutes, purpose=purpose, block=is_block
+            db,
+            user=user,
+            space=space,
+            start=when,
+            minutes=length,
+            purpose=purpose,
+            block=is_block,
         )
     except svc.ReservationError as exc:
         db.rollback()
@@ -237,7 +246,7 @@ def create(
         except svc.ReservationError:
             raise HTTPException(400, str(exc)) from exc
         ctx = _form_ctx(user, group, space, name, when, error=str(exc), purpose=purpose)
-        return render(request, "reservations/new.html", 400, minutes=minutes, **ctx)
+        return render(request, "reservations/new.html", 400, minutes=length, **ctx)
     action = (
         "reservation.blocked"
         if is_block
@@ -254,7 +263,7 @@ def create(
         request=request,
         space=space,
         starts_at=r.start.isoformat(),
-        minutes=minutes,
+        minutes=length,
     )
     db.commit()
     kick_outbox(background)

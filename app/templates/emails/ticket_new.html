@@ -3,6 +3,7 @@
 <p><strong>New request #{{ ticket_id }}</strong> from {{ requester }} ({{ requester_email }})</p>
 <p><strong>{{ subject_line }}</strong></p>
 {% if details %}<p style="white-space:pre-wrap">{{ details }}</p>{% endif %}
-{% if has_conversation %}<p style="font-size:13px;color:#5b6475">Their conversation with the assistant is attached to the ticket.</p>{% endif %}
+{% if questions %}<p style="font-size:13px;color:#5b6475">Questions they asked the assistant first:</p>
+<ul style="font-size:13px;color:#5b6475">{% for q in questions %}<li>{{ q }}</li>{% endfor %}</ul>{% endif %}
 <p><a href="{{ link }}" style="display:inline-block;background:#1f5f99;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none">Open the ticket</a></p>
 {% endblock %}

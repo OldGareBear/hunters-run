@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
 from app.db import utcnow
@@ -55,12 +55,26 @@ def create_draft(
 
 
 def queue_blast(db: Session, blast: EmailBlast, sender: User) -> int:
-    """Queue the blast. Idempotent: a blast is only ever queued once."""
+    """Queue the blast. Idempotent: a blast is only ever queued once.
+
+    The draft is claimed with a conditional UPDATE, so of two sends at the same time
+    (two tabs, two board members, a double tap) only one matches the row; on Postgres
+    the second waits for the first to commit, then matches nothing.
+    """
     if blast.status != "draft":
         raise BlastError("This announcement has already been sent.")
     people = recipients(db, blast.audience_roles, official=blast.is_official_notice)
     if not people:
         raise BlastError("No one in the chosen groups can receive this message.")
+    queued_at = utcnow()
+    claimed = db.execute(
+        update(EmailBlast)
+        .where(EmailBlast.id == blast.id, EmailBlast.status == "draft")
+        .values(status="queued", queued_at=queued_at)
+        .execution_options(synchronize_session=False)
+    ).rowcount
+    if not claimed:
+        raise BlastError("This announcement has already been sent.")
     paragraphs = [p.strip() for p in blast.body.split("\n\n") if p.strip()]
     for person in people:
         enqueue(
@@ -76,6 +90,6 @@ def queue_blast(db: Session, blast: EmailBlast, sender: User) -> int:
             official=blast.is_official_notice,
         )
     blast.status = "queued"
+    blast.queued_at = queued_at
     blast.recipient_count = len(people)
-    blast.queued_at = utcnow()
     return len(people)

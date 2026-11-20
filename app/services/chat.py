@@ -115,8 +115,7 @@ def ask(db: Session, user: User, conv: Conversation, question: str) -> ChatMessa
             conversation_id=conv.id, role="assistant", content=ERROR_ANSWER, answered=False
         )
         db.add(reply)
-        chat_limits.record(db, user)
-        db.commit()
+        db.commit()  # not counted: an outage shouldn't use up people's questions
         return reply
 
     quotes: dict[int, str] = {}

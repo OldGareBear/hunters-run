@@ -105,7 +105,7 @@ def send(
     request: Request,
     background: BackgroundTasks,
     blast_id: int,
-    confirm_count: int = Form(...),
+    confirm_count: str = Form(...),
     user: User = Depends(require_perm(Perm.BLASTS_SEND)),
     db: Session = Depends(get_db),
 ):
@@ -113,7 +113,7 @@ def send(
     current = len(
         blast_service.recipients(db, blast.audience_roles, official=blast.is_official_notice)
     )
-    if current != confirm_count:
+    if str(current) != confirm_count.strip():
         return redirect(
             f"/blasts/{blast.id}",
             f"The audience changed to {current} people since you previewed it. "
@@ -123,6 +123,7 @@ def send(
     try:
         n = blast_service.queue_blast(db, blast, user)
     except blast_service.BlastError as exc:
+        db.rollback()
         return redirect(f"/blasts/{blast.id}", str(exc), "error")
     audit(
         db,

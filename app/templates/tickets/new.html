@@ -3,7 +3,10 @@
 {% block content %}
 <section class="card">
   <h1>Ask management</h1>
-  {% if conv %}<p class="muted">Your conversation with the assistant is attached, so you don't have to repeat yourself.</p>{% endif %}
+  {% if questions %}
+  <p class="muted">Management will see the questions you asked the assistant, so you don't have to repeat yourself. They won't see the assistant's answers.</p>
+  <ul class="small">{% for q in questions %}<li>{{ q }}</li>{% endfor %}</ul>
+  {% endif %}
   {% include "_errors.html" %}
   <form method="post" action="{{ '/chat/%d/escalate' % conv.id if conv else '/tickets' }}">
     {{ csrf_input(request) }}

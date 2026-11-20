@@ -261,6 +261,8 @@ def test_booking_through_the_pages_and_privacy(client_for, db):
     # Rule errors come back on the form.
     again = owner.post_form("/reservations/tennis", {"start": _tomorrow(15), "minutes": "60"})
     assert again.status_code == 400 and "used its 1 booking" in again.text
+    bad = owner.post_form("/reservations/tennis", {"start": _tomorrow(15), "minutes": "an hour"})
+    assert bad.status_code == 400 and "Choose how long" in bad.text
 
     assert other.get(f"/reservations/r/{r.id}").status_code == 404
     assert other.post_form(f"/reservations/r/{r.id}/cancel").status_code == 404
@@ -315,6 +317,8 @@ def test_management_sets_units_but_not_for_admins(client_for, make_user, db):
     db.expire_all()
     assert db.get(accounts.User, owner.id).unit == "4D"
     assert board.post_form(f"/admin/users/{admin.id}/unit", {"unit": "1"}).status_code == 403
+    # Nor their own: joining another household would share its bookings.
+    assert board.post_form(f"/admin/users/{board.user.id}/unit", {"unit": "4D"}).status_code == 403
 
 
 def test_invite_carries_the_unit(db, make_user):

@@ -5,9 +5,10 @@ Subject: {{ subject_line }}
 
 {{ details }}
 {% endif %}
-{% if has_conversation %}
+{% if questions %}
 
-Their conversation with the assistant is attached to the ticket.
-{% endif %}
+Questions they asked the assistant first:
+{% for q in questions %}- {{ q }}
+{% endfor %}{% endif %}
 
 Open the ticket: {{ link }}

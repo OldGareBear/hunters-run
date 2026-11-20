@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 
-from app.models import ChatMessage, Conversation, User
+from app.models import ChatMessage, ChatUsage, Conversation, User
 from app.permissions import Role
 from app.rag.llm import Answer, Citation
 from app.rag.retrieval import retrieve
@@ -143,6 +143,7 @@ def test_llm_failure_is_handled(client_for, docs, monkeypatch, db):
     resp = owner.post_form("/chat", {"question": "When is the pool open?"})
     page = owner.get(resp.headers["location"].split("#")[0])
     assert "reach the assistant" in page.text
+    assert db.scalar(select(func.count(ChatUsage.id))) == 0  # doesn't use up a question
 
 
 def test_offline_llm_end_to_end(client_for, docs, db):

@@ -69,7 +69,11 @@ def start_chat(
     conv = Conversation(user_id=user.id)
     db.add(conv)
     db.flush()
-    chat_service.ask(db, user, conv, question)
+    try:
+        chat_service.ask(db, user, conv, question)
+    except chat_service.LimitReached as exc:  # e.g. another tab used the last question
+        db.rollback()
+        return redirect("/chat", str(exc), "error")
     return redirect(f"/chat/{conv.id}#latest")
 
 
@@ -123,6 +127,7 @@ def escalate_form(
         request,
         "tickets/new.html",
         conv=conv,
+        questions=ticket_service.conversation_questions(conv),
         subject=chat_service.title_from(last_q),
     )
 
@@ -150,6 +155,7 @@ def escalate(
             "tickets/new.html",
             400,
             conv=conv,
+            questions=ticket_service.conversation_questions(conv),
             subject=subject,
             details=details,
             error=str(exc),

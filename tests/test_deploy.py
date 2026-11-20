@@ -139,6 +139,17 @@ def test_chat_page_shows_the_pause(client_for, db, docs, llm, keyword, monkeypat
     assert db.scalar(select(Conversation).where(Conversation.user_id == c.user.id)) is None
 
 
+def test_limit_reached_while_starting_a_chat_is_a_message(client_for, db, monkeypatch):
+    def ask(*_a, **_k):  # another tab used the last question after the route's check
+        raise chat_service.LimitReached("You've asked 20 questions today")
+
+    monkeypatch.setattr(chat_service, "ask", ask)
+    c = client_for(Role.HOMEOWNER)
+    r = c.post_form("/chat", {"question": "pool?"})
+    assert r.status_code == 303 and r.headers["location"] == "/chat"
+    assert db.scalar(select(Conversation)) is None
+
+
 def test_admins_see_the_month_spend(client_for, db, monkeypatch):
     monkeypatch.setattr(get_settings(), "chat_monthly_budget_usd", 5)
     db.add(ChatUsage(user_id=None, cost_micros=1_230_000))

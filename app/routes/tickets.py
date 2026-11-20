@@ -148,6 +148,8 @@ def update_status(
     ticket = _get(db, user, ticket_id)
     assignee = None
     if assignee_id:
+        if not assignee_id.isdigit():
+            raise HTTPException(400)
         assignee = db.get(User, int(assignee_id))
         if assignee is None or not has_perm(assignee, Perm.TICKETS_HANDLE):
             raise HTTPException(400)

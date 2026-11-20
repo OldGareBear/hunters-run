@@ -39,10 +39,15 @@ def clean_unit(unit: str) -> str:
 
 
 def may_set_unit(actor: User, target: User) -> bool:
-    """Admins can set anyone's unit; board and management can for everyone but admins."""
+    """Admins can set anyone's unit; board and management can for everyone but admins
+    and themselves (joining another household would share its bookings and limits)."""
     if has_perm(actor, Perm.USERS_MANAGE):
         return True
-    return has_perm(actor, Perm.USERS_INVITE_HOMEOWNER) and target.role != Role.ADMIN.value
+    return (
+        has_perm(actor, Perm.USERS_INVITE_HOMEOWNER)
+        and target.role != Role.ADMIN.value
+        and target.id != actor.id
+    )
 
 
 def create_invite(
