@@ -203,7 +203,7 @@ def upload(
         return redirect(
             f"/documents/{doc.id}", f"Uploaded, but indexing failed: {doc.error}", "error"
         )
-    return redirect(f"/documents/{doc.id}", "Uploaded and indexed for the assistant.")
+    return redirect(f"/documents/{doc.id}", "Uploaded and indexed for Hunter.")
 
 
 @router.post("/sync")

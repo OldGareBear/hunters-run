@@ -142,7 +142,7 @@ def test_llm_failure_is_handled(client_for, docs, monkeypatch, db):
     owner = client_for(Role.HOMEOWNER)
     resp = owner.post_form("/chat", {"question": "When is the pool open?"})
     page = owner.get(resp.headers["location"].split("#")[0])
-    assert "reach the assistant" in page.text
+    assert "Hunter couldn" in page.text and "answer just now" in page.text
     assert db.scalar(select(func.count(ChatUsage.id))) == 0  # doesn't use up a question
 
 

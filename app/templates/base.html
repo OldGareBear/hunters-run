@@ -12,7 +12,7 @@
   <a class="brand" href="/">{{ settings().hoa_name }}</a>
   {% if user %}
   <nav>
-    {% if has_perm(user, Perm.CHAT) %}<a href="/chat">Ask</a>{% endif %}
+    {% if has_perm(user, Perm.CHAT) %}<a href="/chat">Ask Hunter</a>{% endif %}
     <a href="/documents">Documents</a>
     {% if has_perm(user, Perm.RESERVATIONS_BOOK) or has_perm(user, Perm.RESERVATIONS_MANAGE) %}<a href="/reservations">Book</a>{% endif %}
     {% if has_perm(user, Perm.ASK_MANAGEMENT) %}<a href="/ask-management">Ask management</a>{% endif %}

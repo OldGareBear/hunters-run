@@ -3,9 +3,9 @@
 A private, invite-only website for a homeowners association. It has six parts:
 
 - **Document library.** The board keeps documents in a Dropbox folder. The portal picks them up automatically, and the subfolder a file is in decides who can see it.
-- **Chatbot.** It answers questions from the documents the person asking is allowed to read, and cites its sources.
+- **Hunter, the chatbot.** It answers questions from the documents the person asking is allowed to read, and cites its sources.
 - **Email announcements.** The board can send them to homeowners, with a preview and an audit trail.
-- **Asking management.** When the chatbot can't help, a homeowner can send the question to management. It goes as an email with the homeowner copied, so management answers by replying and the conversation carries on by email. The portal keeps no copy.
+- **Asking management.** When Hunter can't help, a homeowner can send the question to management. It goes as an email with the homeowner copied, so management answers by replying and the conversation carries on by email. The portal keeps no copy. The email ends with a clearly marked **Hunter Bot Context** section: facts from the documents that help management answer or decide whether it needs the board, each with a link to its source.
 - **Duty calendar and weekly review.** Recurring board and management duties, uploaded as the board's month-grid calendar (Excel or CSV), a CSV list, or one at a time. Once a week the portal reviews the calendar and recent documents, meeting minutes above all, and emails board and management members their next best actions, only when something needs them.
 - **Amenity booking.** Households book the tennis court from a weekly calendar, under limits that keep things fair, and request the clubhouse, which management approves.
 
@@ -36,7 +36,7 @@ The whole policy lives in `app/permissions.py`. Every route checks it on the ser
 1. When a document is added, its text is extracted (PDF, Word, Markdown or plain text), split into overlapping chunks and embedded. The chunks are stored in Postgres with pgvector.
 2. When someone asks a question, the search query itself filters on the document's sharing table (`document_access.role IN (<the asker's role>)`). Text the asker can't read is never retrieved, so it is never sent to the model. `tests/test_chat.py` checks that a homeowner's question never puts board-only text in front of the model.
 3. The permitted passages go to Claude as `document` blocks with citations turned on. The answer is shown with numbered links to the source document and page.
-4. If nothing relevant is found, the model isn't called at all. The chatbot says it couldn't find an answer and offers to send the question to management. The same offer appears under every answer. That email copies only the asker's own questions, never the assistant's answers, which may quote documents management can't read.
+4. If nothing relevant is found, the model isn't called at all. The chatbot says it couldn't find an answer and offers to send the question to management. The same offer appears under every answer. That email copies only the asker's own questions, never Hunter's answers, which may quote documents management can't read. Its Hunter Bot Context section is searched again, limited to documents both the asker and management can read, because the asker is copied and replies quote the email. Hunter keeps only lines that cite a document and drops any with links or contact details. If nothing relevant is found, the section says so. It counts toward the monthly budget but not the asker's daily questions, and if Hunter is off, over budget or fails, the email still goes with a note saying no context was added.
 5. Short follow-up questions are searched together with the previous question. Earlier turns are replayed as plain text only, so an earlier answer's sources can't leak into a later conversation.
 
 The system prompt tells the model to answer only from the provided documents, to say so when they don't cover the question, and to ignore any instructions written inside a document.

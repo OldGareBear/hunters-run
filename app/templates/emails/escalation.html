@@ -3,7 +3,20 @@
 <p><strong>{{ requester }}</strong> ({{ requester_email }}{% if unit %}, {{ unit }}{% endif %}) sent this to management from the portal.</p>
 <p><strong>{{ subject_line }}</strong></p>
 {% if details %}<p style="white-space:pre-wrap">{{ details }}</p>{% endif %}
-{% if questions %}<p style="font-size:13px;color:#5b6475">Questions they asked the portal's assistant first:</p>
+{% if questions %}<p style="font-size:13px;color:#5b6475">Questions they asked Hunter, the portal's assistant, first:</p>
 <ul style="font-size:13px;color:#5b6475">{% for q in questions %}<li>{{ q }}</li>{% endfor %}</ul>{% endif %}
 <p style="font-size:13px;color:#5b6475">Reply to this email to answer {{ requester }} directly. They are copied on it, and the portal keeps no copy.</p>
+{% if context %}
+<div style="margin-top:24px;border:1px solid #c9cfdb;border-left:4px solid #3d5a80;background:#f5f7fa;padding:12px 16px">
+<p style="margin:0 0 4px;font-weight:bold;font-size:15px">Hunter Bot Context</p>
+<p style="margin:0 0 10px;font-size:12px;color:#5b6475">Added by Hunter, the portal's assistant. {{ requester }} didn't write this part. It comes only from documents {{ requester }} and management can both see, and it can be wrong, so check the source before relying on it.</p>
+{% if context.lines %}
+<ul style="margin:0 0 10px;padding-left:20px">{% for line in context.lines %}<li>{{ line }}</li>{% endfor %}</ul>
+<p style="margin:0;font-size:12px;color:#5b6475">Sources:</p>
+<ol style="margin:0;padding-left:20px;font-size:12px;color:#5b6475">{% for src in context.sources %}<li value="{{ src.n }}"><a href="{{ src.url }}">{{ src.title }}</a>{% if src.page %}, page {{ src.page }}{% endif %}</li>{% endfor %}</ol>
+{% else %}
+<p style="margin:0">{{ context.note }}</p>
+{% endif %}
+</div>
+{% endif %}
 {% endblock %}

@@ -68,6 +68,7 @@ tr.inactive { opacity: .55; }
 .msg .body p { margin: 0 0 .5rem; }
 .msg.user { align-self: flex-end; max-width: 80%; background: var(--user-bubble); padding: .6rem .9rem; border-radius: 12px; }
 .msg.assistant { max-width: 92%; }
+.msg .who { font-size: .8rem; font-weight: 600; color: var(--muted); margin-bottom: .2rem; }
 .messages.compact .msg.user { max-width: 100%; align-self: stretch; }
 .sources { margin: .5rem 0 0; padding-left: 0; list-style: none; font-size: .88rem; }
 .sources li { margin-bottom: .4rem; }

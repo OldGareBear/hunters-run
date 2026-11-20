@@ -13,7 +13,7 @@
     {% endfor %}
     </tbody>
   </table>
-  <p class="muted small">To change who can see a file, move it to another folder. Files anywhere else are ignored. Subfolders take the access of the folder they're in. PDF, Word (.docx), .txt and .md files are read by the assistant; scanned PDFs without text can't be.</p>
+  <p class="muted small">To change who can see a file, move it to another folder. Files anywhere else are ignored. Subfolders take the access of the folder they're in. PDF, Word (.docx), .txt and .md files are read by Hunter; scanned PDFs without text can't be.</p>
   <form method="post" action="/documents/sync" data-busy="Checking Dropbox...">
     {{ csrf_input(request) }}
     <button class="primary">Check Dropbox now</button>

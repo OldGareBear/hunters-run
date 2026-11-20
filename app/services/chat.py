@@ -17,7 +17,7 @@ from app.services import chat_limits
 log = logging.getLogger(__name__)
 
 ERROR_ANSWER = (
-    "Sorry, I couldn't reach the assistant just now. Please try again in a minute, "
+    "Sorry, Hunter couldn't answer just now. Please try again in a minute, "
     "or escalate your question to management."
 )
 _MARK = re.compile(r"\[\[src:(\d+)\]\]")
