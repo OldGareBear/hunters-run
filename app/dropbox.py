@@ -40,6 +40,23 @@ class DropboxFile:
     content_hash: str
     size: int
 
+    @classmethod
+    def from_api(cls, e: dict) -> DropboxFile:
+        return cls(
+            id=e["id"],
+            name=e["name"],
+            path_lower=e["path_lower"],
+            path_display=e.get("path_display", e["path_lower"]),
+            content_hash=e.get("content_hash", e.get("rev", "")),
+            size=int(e.get("size", 0)),
+        )
+
+
+# A web request has to answer inside API Gateway's 29 seconds, so calls made while
+# serving a page get short timeouts, one retry and short waits. Background work
+# (the sync) keeps the defaults.
+REQUEST_LIMITS = {"timeout": httpx.Timeout(8.0, connect=3.0), "max_retries": 1, "max_wait": 2.0}
+
 
 class DropboxClient:
     def __init__(
@@ -50,13 +67,16 @@ class DropboxClient:
         refresh_token: str,
         transport: httpx.BaseTransport | None = None,
         max_retries: int = 3,
+        timeout: float | httpx.Timeout = 60,
+        max_wait: float = 60,
     ) -> None:
         self._creds = (app_key, app_secret, refresh_token)
-        self._http = httpx.Client(timeout=60, transport=transport)
+        self._http = httpx.Client(timeout=timeout, transport=transport)
         self._token: str | None = None
         self._token_expires = 0.0
         self._lock = threading.Lock()
         self._max_retries = max_retries
+        self._max_wait = max_wait  # longest pause before a retry, whatever Retry-After says
 
     def _access_token(self, force: bool = False) -> str:
         with self._lock:
@@ -88,7 +108,7 @@ class DropboxClient:
             except httpx.TransportError as exc:
                 if attempt == self._max_retries:
                     raise DropboxError("Dropbox is unreachable") from exc
-                time.sleep(2**attempt)
+                time.sleep(min(2**attempt, self._max_wait))
                 continue
             if resp.status_code == 401 and not refreshed:
                 refreshed = True
@@ -96,7 +116,8 @@ class DropboxClient:
                 continue
             if resp.status_code == 429 or resp.status_code >= 500:
                 if attempt < self._max_retries:
-                    time.sleep(float(resp.headers.get("Retry-After", 2**attempt)))
+                    wait = float(resp.headers.get("Retry-After", 2**attempt))
+                    time.sleep(min(wait, self._max_wait))
                     continue
             return resp
         assert resp is not None  # noqa: S101 - loop always runs at least once
@@ -126,14 +147,7 @@ class DropboxClient:
             body = resp.json()
             for e in body.get("entries", []):
                 if e.get(".tag") == "file":
-                    yield DropboxFile(
-                        id=e["id"],
-                        name=e["name"],
-                        path_lower=e["path_lower"],
-                        path_display=e.get("path_display", e["path_lower"]),
-                        content_hash=e.get("content_hash", e.get("rev", "")),
-                        size=int(e.get("size", 0)),
-                    )
+                    yield DropboxFile.from_api(e)
             if not body.get("has_more"):
                 return
             resp = self._call(
@@ -142,20 +156,37 @@ class DropboxClient:
 
     def temporary_link(self, file_id: str) -> str:
         """A direct download link for the file that works for 4 hours."""
+        return self.temporary_link_with_meta(file_id)[0]
+
+    def temporary_link_with_meta(self, file_id: str) -> tuple[str, DropboxFile]:
+        """The link, and the file as it is now (where it lives, its size)."""
         resp = self._call(f"{API}/files/get_temporary_link", json_body={"path": file_id})
         if resp.status_code != 200:
             raise self._error(resp, "Download link")
-        return resp.json()["link"]
+        body = resp.json()
+        try:
+            return body["link"], DropboxFile.from_api(body["metadata"])
+        except (KeyError, TypeError) as exc:
+            raise DropboxError("Download link: Dropbox didn't describe the file") from exc
 
     def download(self, file_id: str) -> bytes:
+        return self.download_with_meta(file_id)[0]
+
+    def download_with_meta(self, file_id: str) -> tuple[bytes, DropboxFile]:
+        """The file's bytes, and the file as it is now, from the Dropbox-API-Result header."""
         resp = self._call(f"{CONTENT}/files/download", arg={"path": file_id})
         if resp.status_code != 200:
             raise self._error(resp, "Download")
-        return resp.content
+        try:
+            meta = DropboxFile.from_api(json.loads(resp.headers["Dropbox-API-Result"]))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise DropboxError("Download: Dropbox didn't describe the file") from exc
+        return resp.content, meta
 
 
 @lru_cache
-def get_dropbox() -> DropboxClient:
+def get_dropbox(for_request: bool = False) -> DropboxClient:
+    """The client for background work, or with `for_request` the one for web requests."""
     s = get_settings()
     if not (s.dropbox_app_key and s.dropbox_app_secret and s.dropbox_refresh_token):
         raise DropboxError("Dropbox isn't connected (set DROPBOX_APP_KEY, _SECRET, _REFRESH_TOKEN)")
@@ -163,4 +194,5 @@ def get_dropbox() -> DropboxClient:
         app_key=s.dropbox_app_key,
         app_secret=s.dropbox_app_secret,
         refresh_token=s.dropbox_refresh_token,
+        **(REQUEST_LIMITS if for_request else {}),
     )

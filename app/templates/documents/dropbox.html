@@ -24,18 +24,21 @@
   <h2>Last check</h2>
   <p>{{ state.last_finished_at.strftime("%b %-d, %Y at %-I:%M %p") }} UTC{% if state.locked_until %} (a check is running now){% endif %}</p>
   {% if state.last_error %}<p class="bad">{{ state.last_error }}</p>{% endif %}
-  {% set r = state.last_summary or {} %}
+  {% set r = summary %}
   <ul>
     <li>{{ (r.added or []) | length }} added, {{ (r.updated or []) | length }} updated, {{ (r.access_changed or []) | length }} moved between folders, {{ (r.removed or []) | length }} removed</li>
   </ul>
-  {% if r.failed %}
+  {% if r.failed or r.failed_hidden %}
   <h3>Couldn't be read</h3>
-  <ul>{% for f in r.failed %}<li>{{ f.path }}: {{ f.reason }}</li>{% endfor %}</ul>
+  <ul>{% for f in r.failed %}<li>{{ f.path }}: {{ f.reason }}</li>{% endfor %}
+  {% if r.failed_hidden %}<li class="muted">{{ r.failed_hidden }} in folders you can't see</li>{% endif %}</ul>
   {% endif %}
   {% if r.skipped %}
   <details><summary>{{ r.skipped | length }} skipped</summary>
   <ul>{% for f in r.skipped %}<li>{{ f.path }}: {{ f.reason }}</li>{% endfor %}</ul>
   </details>
+  {% elif r.skipped_count %}
+  <p class="muted small">{{ r.skipped_count }} skipped (outside the shared folders, unsupported or too large). An administrator can see which.</p>
   {% endif %}
 </section>
 {% endif %}

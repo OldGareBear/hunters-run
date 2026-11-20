@@ -167,7 +167,7 @@ To serve the portal at, say, `portal.yourhoa.org`:
 
 - **Deploys** happen on every merge to `main`. A failed check stops the deploy before anything changes.
 - **Logs** are in CloudWatch under `/aws/lambda/hoa-portal-web` and `/aws/lambda/hoa-portal-tasks`.
-- **Background work.** Email goes out right after the action that caused it. Every hour the tasks function retries any email that failed and checks Dropbox. Change the schedule with `worker_schedule` in `infra/app/variables.tf`.
-- **Large downloads.** Lambda can return at most 6 MB, so files over 4 MB are handed to Dropbox as a temporary download link (valid for four hours) after the portal checks the person may see them.
+- **Background work.** Email goes out right after the action that caused it. Every hour the tasks function retries any email that failed and checks Dropbox. So a file moved in Dropbox shows its new place (and the chatbot its new text) within the hour, or straight away after **Check Dropbox now**. Change the schedule with `worker_schedule` in `infra/app/variables.tf`.
+- **Large downloads.** Lambda can return at most 6 MB, so files over 4 MB are handed to Dropbox as a temporary download link (valid for four hours) after the portal checks the person may see them, in the folder the file is in now.
 - **Rolling back.** Revert the change on `main`; the merge deploys the previous version.
 - **Removing everything.** `terraform destroy` in `infra/app` (with the same `-backend-config` as the workflow), then in `infra/bootstrap`. Delete the Neon project and the Anthropic key separately.

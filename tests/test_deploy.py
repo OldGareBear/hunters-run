@@ -224,12 +224,17 @@ def test_dropbox_temporary_link():
             return httpx.Response(200, json={"access_token": "t", "expires_in": 14400})
         assert request.url.path.endswith("/files/get_temporary_link")
         assert json.loads(request.content) == {"path": "id:abc"}
-        return httpx.Response(200, json={"link": "https://dl.dropboxusercontent.com/x"})
+        meta = {"id": "id:abc", "name": "a.pdf", "path_lower": "/hoa portal/board/a.pdf"}
+        return httpx.Response(
+            200, json={"metadata": meta, "link": "https://dl.dropboxusercontent.com/x"}
+        )
 
     client = DropboxClient(
         app_key="k", app_secret="s", refresh_token="r", transport=httpx.MockTransport(handler)
     )
     assert client.temporary_link("id:abc") == "https://dl.dropboxusercontent.com/x"
+    link, now = client.temporary_link_with_meta("id:abc")
+    assert now.path_lower == "/hoa portal/board/a.pdf"  # where the file is now
 
 
 def test_big_dropbox_files_redirect(client_for, db, docs, monkeypatch):
@@ -237,14 +242,19 @@ def test_big_dropbox_files_redirect(client_for, db, docs, monkeypatch):
 
     monkeypatch.setattr(get_settings(), "download_redirect_over_mb", 4)
 
+    def meta(file_id):
+        path = "/hoa portal/everyone/x.pdf"
+        return dbx.DropboxFile(file_id, "x.pdf", path, path, "", 10)
+
     class FakeDropbox:
-        def temporary_link(self, file_id):
-            return f"https://dl.dropboxusercontent.com/{file_id}"
+        def temporary_link_with_meta(self, file_id):
+            return f"https://dl.dropboxusercontent.com/{file_id}", meta(file_id)
 
-        def download(self, file_id):
-            return b"small file"
+        def download_with_meta(self, file_id):
+            return b"small file", meta(file_id)
 
-    monkeypatch.setattr(dbx, "get_dropbox", lambda: FakeDropbox())
+    monkeypatch.setattr(get_settings(), "dropbox_root", "/HOA Portal")
+    monkeypatch.setattr(dbx, "get_dropbox", lambda for_request=False: FakeDropbox())
     big, small = db.scalars(select(Document).order_by(Document.id)).all()[:2]
     for doc, size in ((big, 9 * 1024 * 1024), (small, 1000)):
         doc.source, doc.source_id, doc.size_bytes = "dropbox", f"id:{doc.id}", size

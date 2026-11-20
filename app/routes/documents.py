@@ -24,6 +24,7 @@ from app.models import Document, User, as_utc
 from app.permissions import (
     VISIBILITY_PRESETS,
     Perm,
+    Role,
     can_manage_document,
     can_view_document,
 )
@@ -60,17 +61,39 @@ def _dropbox_mode() -> bool:
     return get_settings().document_source == "dropbox"
 
 
-def _dropbox_page(request: Request, db: Session, status_code: int = 200, **ctx):
+def _dropbox_page(request: Request, db: Session, user: User, status_code: int = 200, **ctx):
     s = get_settings()
+    state = dropbox_sync.last_state(db)
     return render(
         request,
         "documents/dropbox.html",
         status_code,
         root=s.dropbox_root,
         folders=[(name, roles) for name, roles in _folder_display()],
-        state=dropbox_sync.last_state(db),
+        state=state,
+        summary=_summary_for(user, state.last_summary if state else {}),
         **ctx,
     )
+
+
+def _summary_for(user: User, summary: dict | None) -> dict:
+    """The last sync's report, without the names of files the viewer couldn't open.
+
+    A file's name can say a lot (an executive-session date, a dispute). Failed files are
+    listed only to people who could see them; skipped ones (outside every shared folder,
+    so seen by nobody) only to admins.
+    """
+    r = dict(summary or {})
+    admin = Role(user.role) == Role.ADMIN
+    failed = r.get("failed") or []
+    r["failed"] = [
+        f for f in failed if admin or user.role in (dropbox_sync.roles_for(f["path"].lower()) or [])
+    ]
+    r["failed_hidden"] = len(failed) - len(r["failed"])
+    r["skipped_count"] = len(r.get("skipped") or [])
+    if not admin:
+        r["skipped"] = []
+    return r
 
 
 def _folder_display() -> list[tuple[str, list[str]]]:
@@ -111,7 +134,7 @@ def upload_form(
     db: Session = Depends(get_db),
 ):
     if _dropbox_mode():
-        return _dropbox_page(request, db)
+        return _dropbox_page(request, db, user)
     return render(
         request,
         "documents/upload.html",
@@ -132,7 +155,11 @@ def upload(
 ):
     if _dropbox_mode():
         return _dropbox_page(
-            request, db, 400, error="Add documents in the Dropbox folder instead of uploading here."
+            request,
+            db,
+            user,
+            400,
+            error="Add documents in the Dropbox folder instead of uploading here.",
         )
     limit = get_settings().max_upload_mb * 1024 * 1024
     data = file.file.read(limit + 1)
@@ -208,18 +235,46 @@ def show(
     )
 
 
+def _not_found(request: Request):
+    return render(
+        request,
+        "error.html",
+        404,
+        title="Not found",
+        message="That page doesn't exist, or you don't have access to it.",
+    )
+
+
 @router.get("/{doc_id}/download")
 def download(
-    request: Request, doc_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
+    request: Request,
+    background: BackgroundTasks,
+    doc_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
 ):
     doc = _visible(db, user, doc_id)
-    limit_mb = get_settings().download_redirect_over_mb
-    direct = doc.source == "dropbox" and limit_mb > 0 and doc.size_bytes > limit_mb * 1024 * 1024
+    limit = get_settings().download_redirect_over_mb * 1024 * 1024
+    link = data = None
     try:
-        if direct:
+        if doc.source == "dropbox":
             from app.dropbox import get_dropbox
 
-            link = get_dropbox().temporary_link(doc.source_id)
+            client = get_dropbox(for_request=True)
+            if limit and doc.size_bytes > limit:
+                link, now = client.temporary_link_with_meta(doc.source_id)
+            else:
+                data, now = client.download_with_meta(doc.source_id)
+                if limit and len(data) > limit:  # replaced by a bigger file since the sync
+                    data = None
+                    link, now = client.temporary_link_with_meta(doc.source_id)
+            # Dropbox serves the file by id, wherever it is now. Check the folder it is
+            # in now, not the one the last sync saw.
+            roles = dropbox_sync.roles_for(now.path_lower)
+            if roles != doc.role_names:
+                run_later(background, "dropbox-sync", _run_sync)
+            if roles is None or (Role(user.role) != Role.ADMIN and user.role not in roles):
+                return _not_found(request)
         else:
             data = doc_service.read_bytes(doc)
     except DropboxError as exc:
@@ -235,7 +290,7 @@ def download(
         request=request,
     )
     db.commit()
-    if direct:
+    if link:
         # Too big to pass through the portal; send the browser to Dropbox's copy.
         return RedirectResponse(link, 303, headers={"Cache-Control": "private, no-store"})
     disposition = "inline" if doc.content_type == "application/pdf" else "attachment"
@@ -282,9 +337,20 @@ def update_visibility(
 
 @router.post("/{doc_id}/reindex")
 def reindex(
-    request: Request, doc_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)
+    request: Request,
+    background: BackgroundTasks,
+    doc_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
 ):
     doc = _manageable(db, user, doc_id)
+    if doc.source == "dropbox":
+        # Re-reading the file by id alone could index contents from a folder with another
+        # audience; a sync re-reads it together with where it is now.
+        run_later(background, "dropbox-sync", _run_sync, actor_id=user.id)
+        return redirect(
+            f"/documents/{doc.id}", "Checking Dropbox now. The document updates when it finishes."
+        )
     try:
         doc_service.index_document(db, doc)
     except DropboxError as exc:

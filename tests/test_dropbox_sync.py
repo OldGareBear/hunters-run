@@ -18,6 +18,7 @@ from app.dropbox import DropboxClient, DropboxError
 from app.models import AuditLog, Document, DocumentChunk
 from app.permissions import Role
 from app.rag.retrieval import retrieve
+from app.services import documents as doc_service
 from app.services import dropbox_sync
 
 BOARD_TEXT = b"# Executive session\n\nThe board voted to refer Lot 7 to collections counsel."
@@ -25,7 +26,8 @@ POOL_TEXT = b"# Pool rules\n\nThe pool is open from 10 AM to 8 PM daily."
 
 
 class FakeDropbox:
-    """Just enough of the Dropbox HTTP API: token refresh, list_folder(+continue), download."""
+    """Just enough of the Dropbox HTTP API: token refresh, list_folder(+continue), download,
+    get_temporary_link."""
 
     def __init__(self, page_size: int = 2):
         self.files: dict[str, dict] = {}  # id -> {"path": display path, "data": bytes}
@@ -36,6 +38,7 @@ class FakeDropbox:
         self.downloads = 0
         self._next_id = 0
         self.missing_root = False
+        self.unreadable: set[str] = set()  # ids whose download fails
 
     # test helpers -------------------------------------------------------------
     def add(self, path: str, data: bytes) -> str:
@@ -54,20 +57,22 @@ class FakeDropbox:
         del self.files[fid]
 
     # API ------------------------------------------------------------------------
+    def _meta(self, fid: str) -> dict:
+        f = self.files[fid]
+        return {
+            ".tag": "file",
+            "id": fid,
+            "name": f["path"].rsplit("/", 1)[1],
+            "path_lower": f["path"].lower(),
+            "path_display": f["path"],
+            "content_hash": hashlib.sha256(f["data"]).hexdigest(),
+            "size": len(f["data"]),
+        }
+
     def _entries(self):
         out = []
         for fid, f in sorted(self.files.items()):
-            out.append(
-                {
-                    ".tag": "file",
-                    "id": fid,
-                    "name": f["path"].rsplit("/", 1)[1],
-                    "path_lower": f["path"].lower(),
-                    "path_display": f["path"],
-                    "content_hash": hashlib.sha256(f["data"]).hexdigest(),
-                    "size": len(f["data"]),
-                }
-            )
+            out.append(self._meta(fid))
             out.append({".tag": "folder", "path_lower": f["path"].lower().rsplit("/", 1)[0]})
         return out
 
@@ -105,8 +110,19 @@ class FakeDropbox:
             fid = json.loads(request.headers["dropbox-api-arg"])["path"]
             if fid not in self.files:
                 return httpx.Response(409, json={"error_summary": "path/not_found/"})
+            if fid in self.unreadable:
+                return httpx.Response(409, json={"error_summary": "path/restricted_content/"})
             self.downloads += 1
-            return httpx.Response(200, content=self.files[fid]["data"])
+            # Dropbox describes the file as it is now in a header (ASCII-escaped JSON).
+            header = json.dumps(self._meta(fid))
+            content = self.files[fid]["data"]
+            return httpx.Response(200, content=content, headers={"Dropbox-API-Result": header})
+        if url.endswith("/files/get_temporary_link"):
+            fid = json.loads(request.content)["path"]
+            if fid not in self.files:
+                return httpx.Response(409, json={"error_summary": "path/not_found/"})
+            link = f"https://dl.dropboxusercontent.com/{fid}"
+            return httpx.Response(200, json={"metadata": self._meta(fid), "link": link})
         raise AssertionError(f"the portal must not call {url}")  # never writes to Dropbox
 
 
@@ -124,7 +140,7 @@ def dropbox(monkeypatch):
     monkeypatch.setattr(s, "dropbox_root", "/HOA Portal")
     import app.dropbox as dbx
 
-    monkeypatch.setattr(dbx, "get_dropbox", lambda: client)
+    monkeypatch.setattr(dbx, "get_dropbox", lambda for_request=False: client)
     monkeypatch.setattr(dropbox_sync, "get_dropbox", lambda: client)
     fake.client = client
     return fake
@@ -333,3 +349,148 @@ def test_web_flow_on_dropbox(dropbox, client_for, db):
 
 def test_sync_button_is_hidden_in_upload_mode(client_for):
     assert client_for(Role.BOARD).post_form("/documents/sync").status_code == 404
+
+
+# --- a file moved to a more private folder ------------------------------------------
+
+SETTLEMENT = b"Settlement with the Lot 7 owner: \x93confidential\x94"  # Windows-1252, not UTF-8
+
+
+@pytest.mark.parametrize("failure", ["unreadable text", "download error"])
+def test_move_with_an_unreadable_edit_still_takes_away_access(
+    dropbox, client_for, db, make_user, failure
+):
+    fid = dropbox.add("/HOA Portal/Everyone/Notes.txt", POOL_TEXT)
+    assert dropbox_sync.sync(db).error == ""
+    owner = client_for(Role.HOMEOWNER)
+    doc_id = _docs(db)["/HOA Portal/Everyone/Notes.txt"].id
+    assert owner.get(f"/documents/{doc_id}").status_code == 200
+
+    # The board moves it to Board/ and replaces it with something the portal can't read.
+    dropbox.move(fid, "/HOA Portal/Board/Notes.txt")
+    if failure == "unreadable text":
+        dropbox.edit(fid, SETTLEMENT)
+    else:
+        dropbox.edit(fid, b"# Notes\n\nNew text.")
+        dropbox.unreadable.add(fid)
+    result = dropbox_sync.sync(db)
+    assert [f["path"] for f in result.failed] == ["/HOA Portal/Board/Notes.txt"]
+
+    doc = _docs(db)["/HOA Portal/Board/Notes.txt"]
+    assert doc.role_names == ["board"] and doc.status == "failed"
+    assert retrieve(db, make_user(Role.HOMEOWNER, "h2@example.com"), "pool open") == []
+    assert owner.get(f"/documents/{doc_id}").status_code == 404
+
+    # Once the file is fixed, the next sync reads it.
+    dropbox.unreadable.clear()
+    dropbox.edit(fid, b"# Notes\n\nReadable again.")
+    assert dropbox_sync.sync(db).updated == ["/HOA Portal/Board/Notes.txt"]
+    assert _docs(db)["/HOA Portal/Board/Notes.txt"].status == "ready"
+
+
+def test_restored_file_that_cant_be_read_stays_hidden(dropbox, db):
+    fid = dropbox.add("/HOA Portal/Everyone/A.md", POOL_TEXT)
+    dropbox.add("/HOA Portal/Everyone/B.md", POOL_TEXT)
+    dropbox_sync.sync(db)
+    dropbox.move(fid, "/HOA Portal/Archive/A.md")
+    dropbox_sync.sync(db)
+    dropbox.move(fid, "/HOA Portal/Board/A.md")
+    dropbox.unreadable.add(fid)
+    dropbox_sync.sync(db)
+    doc = _docs(db)["/HOA Portal/Board/A.md"]
+    assert doc.deleted_at is not None and doc.role_names == ["board"]
+
+
+def test_download_checks_the_folder_the_file_is_in_now(dropbox, client_for, db):
+    fid = dropbox.add("/HOA Portal/Everyone/Minutes.md", BOARD_TEXT)
+    dropbox_sync.sync(db)
+    doc_id = _docs(db)["/HOA Portal/Everyone/Minutes.md"].id
+    owner = client_for(Role.HOMEOWNER)
+    assert owner.get(f"/documents/{doc_id}/download").content == BOARD_TEXT
+
+    # Moved to Board/ in Dropbox; the portal hasn't synced yet.
+    dropbox.move(fid, "/HOA Portal/Board/Minutes.md")
+    assert owner.get(f"/documents/{doc_id}/download").status_code == 404
+    # The refused download started a sync, which has caught up.
+    assert _docs(db)["/HOA Portal/Board/Minutes.md"].role_names == ["board"]
+    board = client_for(Role.BOARD)
+    assert board.get(f"/documents/{doc_id}/download").content == BOARD_TEXT
+
+    # Moved out of the shared folders altogether: nobody downloads it, admins included.
+    dropbox.move(fid, "/HOA Portal/Drafts/Minutes.md")
+    assert board.get(f"/documents/{doc_id}/download").status_code == 404
+    admin = client_for(Role.ADMIN)
+    assert admin.get(f"/documents/{doc_id}/download").status_code == 404
+
+
+def test_file_that_grew_since_the_sync_goes_by_link(dropbox, client_for, db, monkeypatch):
+    monkeypatch.setattr(get_settings(), "download_redirect_over_mb", 1)
+    fid = dropbox.add("/HOA Portal/Everyone/Budget.md", POOL_TEXT)
+    dropbox_sync.sync(db)
+    doc_id = _docs(db)["/HOA Portal/Everyone/Budget.md"].id
+    dropbox.edit(fid, POOL_TEXT + b"x" * (2 * 1024 * 1024))  # too big for a Lambda response
+    resp = client_for(Role.HOMEOWNER).get(f"/documents/{doc_id}/download", follow_redirects=False)
+    assert resp.status_code == 303
+    assert resp.headers["location"] == f"https://dl.dropboxusercontent.com/{fid}"
+
+
+def test_reindex_of_a_moved_file_syncs_instead(dropbox, client_for, db, make_user):
+    fid = dropbox.add("/HOA Portal/Everyone/Notes.md", POOL_TEXT)
+    dropbox_sync.sync(db)
+    doc_id = _docs(db)["/HOA Portal/Everyone/Notes.md"].id
+    dropbox.move(fid, "/HOA Portal/Board/Notes.md")
+    dropbox.edit(fid, BOARD_TEXT)
+    mgr = client_for(Role.MANAGEMENT)
+    assert mgr.post_form(f"/documents/{doc_id}/reindex").status_code == 303
+    owner = make_user(Role.HOMEOWNER, "h2@example.com")
+    assert retrieve(db, owner, "Lot 7 collections counsel", min_score=-1) == []
+    assert _docs(db)["/HOA Portal/Board/Notes.md"].role_names == ["board"]
+
+
+def test_reindex_from_the_command_line_skips_moved_files(dropbox, db):
+    fid = dropbox.add("/HOA Portal/Everyone/Notes.md", POOL_TEXT)
+    dropbox_sync.sync(db)
+    dropbox.move(fid, "/HOA Portal/Board/Notes.md")
+    dropbox.edit(fid, BOARD_TEXT)
+    doc = _docs(db)["/HOA Portal/Everyone/Notes.md"]
+    with pytest.raises(DropboxError, match="moved"):
+        doc_service.index_document(db, doc)
+
+
+def test_sync_report_hides_names_of_files_the_viewer_cant_see(dropbox, client_for, db):
+    dropbox.add("/HOA Portal/Board/2026-03 executive session.pdf", b"not a pdf")
+    dropbox.add("/HOA Portal/Management/vendor notes.pdf", b"not a pdf")
+    dropbox.add("/HOA Portal/Drafts/settlement draft.md", POOL_TEXT)
+    dropbox.add("/HOA Portal/Everyone/Pool rules.md", POOL_TEXT)
+    dropbox_sync.sync(db)
+    mgr = client_for(Role.MANAGEMENT).get("/documents/upload").text
+    assert "vendor notes" in mgr
+    assert "executive session" not in mgr and "1 in folders you can't see" in mgr
+    assert "settlement draft" not in mgr and "1 skipped" in mgr
+    admin = client_for(Role.ADMIN).get("/documents/upload").text
+    assert "executive session" in admin and "settlement draft" in admin
+
+
+def test_web_requests_wait_briefly_for_dropbox(monkeypatch):
+    import app.dropbox as dbx
+
+    waits = []
+    monkeypatch.setattr(dbx.time, "sleep", waits.append)
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/oauth2/token"):
+            return httpx.Response(200, json={"access_token": "t", "expires_in": 14400})
+        calls.append(request.url.path)
+        return httpx.Response(429, headers={"Retry-After": "300"})
+
+    client = DropboxClient(
+        app_key="k",
+        app_secret="s",
+        refresh_token="r",
+        transport=httpx.MockTransport(handler),
+        **dbx.REQUEST_LIMITS,
+    )
+    with pytest.raises(DropboxError):
+        client.download("id:x")
+    assert len(calls) == 2 and waits == [2.0]  # one retry, after 2 s rather than 5 minutes

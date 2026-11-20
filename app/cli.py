@@ -21,6 +21,7 @@ from sqlalchemy import select
 
 from app.config import get_settings
 from app.db import session_factory
+from app.dropbox import DropboxError
 from app.email.outbox import deliver_pending
 from app.models import Document, User
 from app.permissions import Role
@@ -190,7 +191,12 @@ def cmd_reindex(_args) -> None:
     db = session_factory()()
     docs = list(db.scalars(select(Document).where(Document.deleted_at.is_(None))))
     for doc in docs:
-        doc_service.index_document(db, doc)
+        try:
+            doc_service.index_document(db, doc)
+        except DropboxError as exc:  # e.g. moved since the last sync: the sync re-reads it
+            db.rollback()
+            print(f"skipped  {doc.title}: {exc}")
+            continue
         db.commit()
         print(f"{doc.status:<8} {doc.title}")
 

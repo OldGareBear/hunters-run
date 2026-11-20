@@ -80,11 +80,20 @@ def create_document(
 
 
 def read_bytes(doc: Document) -> bytes:
-    """The document's file: from Dropbox for synced documents, else from storage."""
-    if doc.source == "dropbox":
-        from app.dropbox import get_dropbox
+    """The document's file: from Dropbox for synced documents, else from storage.
 
-        return get_dropbox().download(doc.source_id)
+    A Dropbox file is fetched by id, wherever it is now. If it has moved to a folder
+    with another audience since the last sync, its new contents must not be indexed
+    under the old one, so that is an error until the sync catches up.
+    """
+    if doc.source == "dropbox":
+        from app.dropbox import DropboxError, get_dropbox
+        from app.services.dropbox_sync import roles_for
+
+        data, meta = get_dropbox().download_with_meta(doc.source_id)
+        if roles_for(meta.path_lower) != doc.role_names:
+            raise DropboxError("The file has moved in Dropbox since the last check")
+        return data
     return get_storage().get(doc.storage_key)
 
 

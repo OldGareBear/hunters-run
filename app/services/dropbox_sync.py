@@ -19,7 +19,7 @@ from dataclasses import asdict, dataclass, field
 from datetime import timedelta
 from pathlib import PurePosixPath
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
 from app.audit import audit
@@ -27,7 +27,7 @@ from app.config import get_settings
 from app.db import utcnow
 from app.dropbox import DropboxClient, DropboxError, DropboxFile, get_dropbox
 from app.ingest.extract import EXTENSIONS, ExtractionError, sniff_content_type
-from app.models import Document, DocumentAccess, SyncState, User
+from app.models import Document, DocumentAccess, DocumentChunk, SyncState, User
 from app.services.documents import index_document, soft_delete
 
 log = logging.getLogger(__name__)
@@ -137,6 +137,13 @@ def _ingest(db: Session, doc: Document, f: DropboxFile, client: DropboxClient) -
     index_document(db, doc, data)
 
 
+def _mark_unreadable(db: Session, doc: Document, exc: Exception) -> None:
+    """The file's new contents couldn't be read: drop the old text, keep the new access."""
+    db.execute(delete(DocumentChunk).where(DocumentChunk.document_id == doc.id))
+    doc.status, doc.error = "failed", str(exc)[:1000]
+    db.commit()
+
+
 def sync(
     db: Session, *, actor: User | None = None, client: DropboxClient | None = None
 ) -> SyncResult:
@@ -207,8 +214,9 @@ def sync(
                     )
                     result.added.append(f.path_display)
                 else:
-                    changed = False
                     restored = doc.deleted_at is not None
+                    reread = restored or doc.source_rev != f.content_hash
+                    changed = reread
                     if doc.source_path != f.path_display:
                         doc.source_path = f.path_display[:1000]
                         doc.filename = f.name[:300]
@@ -230,15 +238,22 @@ def sync(
                         if not restored:
                             result.access_changed.append(f.path_display)
                         changed = True
-                    if restored or doc.source_rev != f.content_hash:
-                        doc.deleted_at = None
-                        _ingest(db, doc, f, client)
-                        result.updated.append(f.path_display)
-                        changed = True
                     if changed:
                         doc.updated_at = utcnow()
                     else:
                         result.unchanged += 1
+                    # Save the new place and audience before reading the file, so a file
+                    # that can't be read never keeps the audience of its old folder.
+                    db.commit()
+                    if reread:
+                        try:
+                            _ingest(db, doc, f, client)
+                        except (DropboxError, ExtractionError) as exc:
+                            db.rollback()
+                            _mark_unreadable(db, doc, exc)
+                            raise
+                        doc.deleted_at = None  # a restored file comes back only once read
+                        result.updated.append(f.path_display)
                 _renew(db)  # a first import of many files can take a while
                 db.commit()
             except (DropboxError, ExtractionError) as exc:
